@@ -1,0 +1,1253 @@
+// AXE Panel (Fase 4). Cablea datos REALES del motor por el puente RPC.
+// Regla de honestidad: nada de datos inventados. Lo que aun no se mide (CPU/RAM en vivo -> Fase 5,
+// activos por tier -> Fase 6) se pinta en estado de reposo, nunca con ruido aleatorio de relleno.
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const AXE = window.AXE;
+
+  // ---------- reloj local (hora, no una medicion) ----------
+  const clk = $('clock');
+  const tick = () => { clk.textContent = new Date().toLocaleTimeString('es-ES', { hour12: false }); };
+  tick(); setInterval(tick, 1000);
+
+  // ---------- version + catalogo ----------
+  AXE.call('app.info', {}).then((info) => {
+    if (info && info.version) $('ver').textContent = info.version;
+  }).catch(() => { $('ver').textContent = '?'; });
+
+  // ---------- chips de hardware (hw.get) ----------
+  function chip(label, value, cls) {
+    const d = document.createElement('div');
+    d.className = 'chip' + (cls ? ' ' + cls : '');
+    // textContent para el valor (viene de CIM local, aun asi evitamos innerHTML): sin riesgo XSS.
+    if (label) d.appendChild(document.createTextNode(label + ' '));
+    const b = document.createElement('b'); b.textContent = value; d.appendChild(b);
+    return d;
+  }
+  function shortCpu(name) {
+    if (!name) return '—';
+    return String(name).replace(/\(R\)|\(TM\)|CPU|Processor|@.*$/g, '').replace(/\s+/g, ' ').trim();
+  }
+  // «NVIDIA GeForce RTX 5050 Laptop GPU» -> «GeForce RTX 5050». Se quitan marca y coletillas, no
+  // el modelo: el modelo es lo único que el usuario necesita reconocer como suyo.
+  function shortGpu(name) {
+    if (!name) return '—';
+    return String(name).replace(/\(R\)|\(TM\)|NVIDIA|Advanced Micro Devices, Inc\.|AMD|Corporation|Graphics Adapter|Laptop GPU/gi, '')
+      .replace(/\s+/g, ' ').trim() || String(name);
+  }
+  AXE.call('hw.get', {}).then((hw) => {
+    const eco = $('eco'); eco.innerHTML = '';
+    eco.appendChild(chip('CPU', shortCpu(hw.CpuName)));
+    if (hw.Cores) eco.appendChild(chip('', hw.Cores + 'C · ' + hw.Threads + 'T'));
+    eco.appendChild(chip('', (hw.RamGB ? hw.RamGB : '—') + ' GB'));
+    // GPU por NOMBRE, no sólo «NVIDIA si la hay». Antes quien tuviera Radeon o Arc no veía ningún
+    // chip de GPU: la interfaz daba a entender que AXE no sabía que existía.
+    if (hw.GpuPrimary) eco.appendChild(chip('GPU', shortGpu(hw.GpuPrimary)));
+    // Hz del panel: el dato que más manda al hablar de FPS, y no estaba.
+    if (hw.RefreshHz) eco.appendChild(chip('', hw.RefreshHz + ' Hz' + (hw.ScreenW ? ' · ' + hw.ScreenW + '×' + hw.ScreenH : '')));
+    eco.appendChild(chip('', hw.IsSSD ? 'SSD/NVMe' : 'HDD'));
+    eco.appendChild(chip('', 'Win ' + (hw.IsWin11 ? '11' : '10') + (hw.DisplayVersion ? ' ' + hw.DisplayVersion : '') + (hw.IsHome ? ' · Home' : '')));
+    eco.appendChild(chip('', hw.IsLaptop ? 'Portátil' : 'Torre'));
+    // Sin adaptador conectado NO se dice «Ethernet»: se dice que no hay red. Afirmar cable porque
+    // no hay Wi-Fi era inventarse un hecho a partir de la ausencia de otro.
+    eco.appendChild(chip('', hw.NicName ? (hw.IsWifi ? 'Wi-Fi' : 'Ethernet') : 'sin red', hw.NicName ? '' : 'off'));
+    if (hw.IsVM) eco.appendChild(chip('', 'máquina virtual', 'off'));
+    if (hw.HasDefender) {
+      const tamper = hw.IsTamperProtected;
+      eco.appendChild(chip('Defender', tamper ? 'Tamper ON' : 'Tamper OFF', tamper ? 'on' : 'off'));
+    }
+    // Lo que el motor NO pudo leer se ENSEÑA. Un panel que calla un fallo de detección deja al
+    // usuario creyendo que AXE vio algo que no vio, y el gating depende justo de eso.
+    const warns = hw.DetectWarnings || [];
+    if (warns.length) {
+      const c = chip('⚠', warns.length + (warns.length === 1 ? ' dato no legible' : ' datos no legibles'), 'off');
+      c.title = warns.join('\n');
+      eco.appendChild(c);
+    }
+  }).catch((e) => {
+    $('eco').innerHTML = '';
+    $('eco').appendChild(chip('', 'hardware no disponible: ' + e.message));
+  });
+
+  // ---------- catalogo por tier (catalog.tiers) ----------
+  AXE.call('catalog.tiers', {}).then((tiers) => {
+    const arr = Array.isArray(tiers) ? tiers : (tiers ? [tiers] : []);
+    const by = {}; arr.forEach((t) => { by[t.tier] = t.total; });
+    if (by[0] != null) $('t0').textContent = by[0];
+    if (by[1] != null) $('t1').textContent = by[1];
+    if (by[2] != null) $('t2').textContent = by[2];
+  }).catch(() => {});
+
+  // ---------- score arc (canvas) ----------
+  const arc = $('arc');
+  const actx = arc.getContext('2d');
+  const A0 = Math.PI * 0.75, A1 = Math.PI * 2.25;
+  function drawArc(v) {
+    const w = arc.width, h = arc.height, cx = w / 2, cy = h / 2, R = w / 2 - 28;
+    actx.clearRect(0, 0, w, h);
+    actx.lineCap = 'round'; actx.lineWidth = 28;
+    actx.strokeStyle = '#232a33';
+    actx.beginPath(); actx.arc(cx, cy, R, A0, A1); actx.stroke();
+    if (v > 0) {
+      const a = A0 + (A1 - A0) * (v / 100);
+      const g = actx.createLinearGradient(0, 0, w, h);
+      g.addColorStop(0, '#c98f24'); g.addColorStop(1, '#E0A32E');
+      actx.strokeStyle = g; actx.shadowColor = 'rgba(224,163,46,.5)'; actx.shadowBlur = 28;
+      actx.beginPath(); actx.arc(cx, cy, R, A0, a); actx.stroke(); actx.shadowBlur = 0;
+    }
+    for (let i = 0; i <= 10; i++) {
+      const ta = A0 + (A1 - A0) * (i / 10), r1 = R - 48, r2 = R - 60;
+      actx.strokeStyle = i <= v / 10 ? 'rgba(224,163,46,.5)' : '#2a313b'; actx.lineWidth = 4;
+      actx.beginPath();
+      actx.moveTo(cx + Math.cos(ta) * r1, cy + Math.sin(ta) * r1);
+      actx.lineTo(cx + Math.cos(ta) * r2, cy + Math.sin(ta) * r2);
+      actx.stroke();
+    }
+  }
+  drawArc(0);
+  function animateArc(target) {
+    const sv = $('scoreVal');
+    if (reduce) { drawArc(target); sv.textContent = target; return; }
+    let t0 = null; const dur = 1100;
+    (function run(ts) {
+      if (!t0) t0 = ts; const p = Math.min((ts - t0) / dur, 1); const e = ease(p);
+      drawArc(target * e); sv.textContent = Math.round(target * e);
+      if (p < 1) requestAnimationFrame(run);
+    })(performance.now());
+  }
+
+  // ---------- reposo honesto: sparkline plana (sin datos aun) ----------
+  function fit(c) {
+    const r = c.getBoundingClientRect();
+    if (r.width) { c.width = r.width * dpr; c.height = r.height * dpr; }
+    const x = c.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return [x, r.width || c.width, r.height || c.height];
+  }
+  function drawRestSpark(c) {
+    const [x, w, h] = fit(c);
+    x.clearRect(0, 0, w, h);
+    x.strokeStyle = '#232a33'; x.lineWidth = 1.4; x.setLineDash([4, 5]);
+    x.beginPath(); x.moveTo(0, h * 0.62); x.lineTo(w, h * 0.62); x.stroke();
+    x.setLineDash([]);
+  }
+  document.querySelectorAll('.spark').forEach(drawRestSpark);
+
+  // ---------- osciloscopio en reposo (rejilla + umbral, sin traza falsa) ----------
+  function drawRestScope() {
+    const c = $('scope'); const [x, w, h] = fit(c);
+    x.clearRect(0, 0, w, h);
+    const top = 520;
+    x.strokeStyle = '#1b212a'; x.lineWidth = 1;
+    for (let g = 0; g <= 5; g++) { const y = h - (g * 100 / top) * h; x.beginPath(); x.moveTo(0, y); x.lineTo(w, y); x.stroke(); }
+    const ty = h - (250 / top) * h;
+    x.strokeStyle = 'rgba(217,96,90,.45)'; x.setLineDash([6, 6]); x.lineWidth = 1.2;
+    x.beginPath(); x.moveTo(0, ty); x.lineTo(w, ty); x.stroke(); x.setLineDash([]);
+    x.fillStyle = '#565f6e'; x.font = '12px ui-monospace,monospace';
+    x.fillText('iniciando muestreo…', 14, h - 14);
+  }
+  drawRestScope();
+
+  // ---------- feeds en vivo (Fase 5): buffers reales, sin ruido de relleno ----------
+  const cpuBuf = [], ramBuf = [], scopeBuf = [];
+  let scopeMax = 0, liveStarted = false, teleLoaded = false, lastMeanUs = null;
+  const cpuCanvas = document.querySelector('.spark[data-c="cpu"]');
+  const ramCanvas = document.querySelector('.spark[data-c="ram"]');
+  const THR = 250; // umbral stutter (µs)
+  function pushBuf(a, v, max) { a.push(v); while (a.length > max) a.shift(); }
+  function drawSpark(c, buf) {
+    const [x, w, h] = fit(c); x.clearRect(0, 0, w, h);
+    if (!buf.length) return;
+    const max = Math.max(12, Math.max.apply(null, buf)) * 1.15, n = buf.length;
+    const X = (i) => i / Math.max(1, n - 1) * w, Y = (v) => h - (v / max) * h;
+    x.beginPath(); x.moveTo(0, h); buf.forEach((v, i) => x.lineTo(X(i), Y(v))); x.lineTo(X(n - 1), h); x.closePath();
+    const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, 'rgba(224,163,46,.16)'); g.addColorStop(1, 'rgba(224,163,46,0)');
+    x.fillStyle = g; x.fill();
+    x.beginPath(); buf.forEach((v, i) => i ? x.lineTo(X(i), Y(v)) : x.moveTo(X(i), Y(v))); x.strokeStyle = '#b98f34'; x.lineWidth = 1.6; x.stroke();
+    x.fillStyle = '#E0A32E'; x.beginPath(); x.arc(X(n - 1), Y(buf[n - 1]), 2.6, 0, 7); x.fill();
+  }
+  function drawScope(c) {
+    c = c || $('scope'); const [x, w, h] = fit(c); x.clearRect(0, 0, w, h);
+    const top = Math.max(520, scopeMax * 1.2);
+    x.strokeStyle = '#1b212a'; x.lineWidth = 1;
+    for (let g = 0; g <= 5; g++) { const y = h - (g / 5) * h; x.beginPath(); x.moveTo(0, y); x.lineTo(w, y); x.stroke(); }
+    const ty = h - (THR / top) * h;
+    x.strokeStyle = 'rgba(217,96,90,.5)'; x.setLineDash([6, 6]); x.lineWidth = 1.2; x.beginPath(); x.moveTo(0, ty); x.lineTo(w, ty); x.stroke(); x.setLineDash([]);
+    if (!scopeBuf.length) { x.fillStyle = '#565f6e'; x.font = '12px ui-monospace,monospace'; x.fillText('esperando primer muestreo…', 14, h - 14); return; }
+    const n = scopeBuf.length, X = (i) => i / Math.max(1, n - 1) * w, Y = (v) => h - (Math.min(v, top) / top) * h;
+    x.beginPath(); x.moveTo(0, h); scopeBuf.forEach((v, i) => x.lineTo(X(i), Y(v))); x.lineTo(X(n - 1), h); x.closePath();
+    const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, 'rgba(224,163,46,.22)'); g.addColorStop(1, 'rgba(224,163,46,0)'); x.fillStyle = g; x.fill();
+    x.beginPath(); scopeBuf.forEach((v, i) => i ? x.lineTo(X(i), Y(v)) : x.moveTo(X(i), Y(v))); x.strokeStyle = '#E0A32E'; x.lineWidth = 1.5; x.stroke();
+    scopeBuf.forEach((v, i) => { if (v > THR) { x.fillStyle = 'rgba(217,96,90,.9)'; x.fillRect(X(i) - 1, Y(v), 2, h - Y(v)); } });
+    const lv = scopeBuf[n - 1]; x.fillStyle = lv > THR ? '#D9605A' : '#E0A32E'; x.beginPath(); x.arc(X(n - 1), Y(lv), 3, 0, 7); x.fill();
+  }
+  function redrawLive() {
+    if (liveStarted) { drawSpark(cpuCanvas, cpuBuf); drawSpark(ramCanvas, ramBuf); drawScope(); }
+    else { document.querySelectorAll('.spark').forEach(drawRestSpark); drawRestScope(); }
+  }
+  addEventListener('resize', () => { redrawLive(); drawArc(lastScore || 0); if (teleLoaded) drawScope($('teleScope')); });
+
+  // ---------- verdict a partir del score real ----------
+  function verdictFor(total) {
+    if (total >= 85) return ['excelente', 'ok'];
+    if (total >= 70) return ['latencia estable', 'ok'];
+    if (total >= 50) return ['mejorable', 'na'];
+    return ['conviene optimizar', 'na'];
+  }
+  function fmtMs(v) { return (v == null) ? 'n/a' : (Number(v).toFixed(v < 1 ? 3 : 2) + ' ms'); }
+  function relTime(iso) {
+    try {
+      const d = new Date(iso.replace(' ', 'T') + (/[zZ]$/.test(iso) ? '' : 'Z'));
+      const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+      if (s < 60) return 'hace ' + Math.round(s) + ' s';
+      return 'hace ' + Math.round(s / 60) + ' min';
+    } catch (e) { return iso; }
+  }
+
+  // ---------- barras de componentes: composicion real del score ----------
+  // maxes: Timer 30, Jitter 35, Cobertura 25, Idle 10 (los mismos pesos de Get-AXEScore).
+  function setBar(k, val, max) {
+    const row = document.querySelector('.sbar[data-k="' + k + '"]'); if (!row) return;
+    const track = row.querySelector('.sbar-track'), bar = track.querySelector('i'), v = row.querySelector('.sbar-v');
+    const na = (val === 'n/a' || val == null);
+    track.classList.toggle('na', na); v.classList.toggle('na', na);
+    if (na) { bar.style.width = '0%'; v.textContent = 'n/a'; return; }
+    const n = Math.max(0, Math.min(max, Number(val)));
+    bar.style.width = (n / max * 100) + '%';
+    v.textContent = n + '/' + max;
+  }
+
+  // ---------- medicion real (measure.score) ----------
+  let lastScore = 0;
+  let prevJitter = null;
+  const btn = $('btnMeasure');
+  function setMeasuring(on) {
+    const v = $('verdict');
+    if (on) {
+      v.className = 'verdict measuring'; v.textContent = '● midiendo…';
+      $('scoreVal').textContent = '—';
+      btn.classList.add('busy'); btn.disabled = true;
+    } else {
+      btn.classList.remove('busy'); btn.disabled = false;
+    }
+  }
+  function runMeasure() {
+    setMeasuring(true);
+    AXE.call('measure.score', {}).then((s) => {
+      lastScore = s.total;
+      animateArc(s.total);
+      const vd = verdictFor(s.total);
+      const v = $('verdict'); v.className = 'verdict ' + (vd[1] === 'ok' ? '' : 'na'); v.textContent = '● ' + vd[0];
+
+      // cobertura real (Tier 0·1 activos / aplicables)
+      $('covVal').textContent = (s.on != null && s.app != null) ? (s.on + '/' + s.app) : 'n/a';
+
+      // delta jitter vs. medicion previa de ESTA sesion (honesto: '—' en la primera)
+      if (prevJitter != null && s.jitterP999 != null) {
+        const d = s.jitterP999 - prevJitter;
+        const pct = prevJitter > 0 ? Math.round((d / prevJitter) * 100) : 0;
+        const el = $('deltaJit');
+        el.textContent = (pct <= 0 ? '' : '+') + pct + '%';
+        el.className = 'n' + (pct <= 0 ? ' up' : '');
+      } else {
+        $('deltaJit').textContent = '—';
+        $('deltaJit').className = 'n';
+      }
+      prevJitter = s.jitterP999;
+
+      $('lastMeas').textContent = s.ts ? relTime(s.ts) : 'ahora';
+
+      // vitales reales medidos bajo demanda
+      $('timerV').textContent = (s.timerMs != null) ? (s.timerMs + ' ms') : 'n/a';
+      $('timerSub').textContent = (s.timer === 'n/a') ? 'no medible' : ('componente ' + s.timer + '/30');
+      $('jitterV').textContent = fmtMs(s.jitterP999);
+      $('jitterSub').textContent = (s.jitter === 'n/a') ? 'no medible · P99.9' : ('P99.9 · componente ' + s.jitter + '/35');
+
+      // barras de composicion del score (Timer 30 / Jitter 35 / Cobertura 25 / Idle 10)
+      setBar('timer', s.timer, 30);
+      setBar('jitter', s.jitter, 35);
+      setBar('coverage', s.coverage, 25);
+      setBar('idle', s.idle, 10);
+
+      // receta real
+      $('receiptBody').textContent = s.breakdown || '(sin desglose)';
+      $('receiptBtn').disabled = false;
+
+      // pill: activas reales
+      if (s.on != null) $('pillTxt').textContent = 'Reversible · ' + s.on + ' activas';
+
+      setMeasuring(false);
+    }).catch((e) => {
+      const v = $('verdict'); v.className = 'verdict na'; v.textContent = '● error al medir';
+      $('scoreVal').textContent = '—';
+      $('receiptBody').textContent = 'Puente error: ' + e.message;
+      setMeasuring(false);
+    });
+  }
+  btn.addEventListener('click', runMeasure);
+  runMeasure(); // medicion automatica al abrir
+
+  // ---------- hojas modales accesibles (AXE-018) ----------
+  // aria-hidden refleja el estado REAL de la hoja, el foco entra al abrir, queda atrapado dentro con Tab y vuelve al
+  // elemento que la abrio (ANTES de ocultarla: ocultar un ancestro con el foco dentro lo bloquea el navegador).
+  const sheetFocus = new Map();
+  const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  function openSheet(el, focusEl) {
+    if (el.classList.contains('open')) return;
+    sheetFocus.set(el, document.activeElement);
+    el.classList.add('open'); el.setAttribute('aria-hidden', 'false');
+    const t = focusEl || el.querySelector(FOCUSABLE) || el.querySelector('.sheet-card');
+    if (t && typeof t.focus === 'function') t.focus();
+  }
+  function closeSheet(el) {
+    if (!el.classList.contains('open')) return;
+    el.classList.remove('open');
+    const back = sheetFocus.get(el); sheetFocus.delete(el);
+    if (back && typeof back.focus === 'function' && document.contains(back)) back.focus();
+    el.setAttribute('aria-hidden', 'true');
+  }
+  addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const open = [...document.querySelectorAll('.sheet.open')].pop();
+    if (!open) return;
+    const f = [...open.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null);
+    if (!f.length) { e.preventDefault(); return; }
+    const first = f[0], last = f[f.length - 1];
+    if (!open.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  // ---------- receta modal ----------
+  const sheet = $('sheet');
+  $('receiptBtn').addEventListener('click', () => { if (!$('receiptBtn').disabled) openSheet(sheet, $('sheetClose')); });
+  $('sheetClose').addEventListener('click', () => closeSheet(sheet));
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(sheet); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(sheet); });
+
+  // ---------- router (Fase 6/7): Panel · Telemetría · Optimizar · Prueba · Seguridad · Ajustes ----------
+  const viewEls = {};
+  document.querySelectorAll('.view[data-view]').forEach((v) => { viewEls[v.dataset.view] = v; });
+  const navItems = [...document.querySelectorAll('.nav-item[data-view]')];
+  const loaded = {};
+  // cada vista se inicializa una sola vez, la primera vez que se abre (init perezoso, sin pegar el arranque).
+  const lazyInit = { optimizar: initOptimizar, telemetria: initTele, sesion: initSesion, prueba: initPrueba, seguridad: initSeguridad, ajustes: initAjustes };
+  function showView(name) {
+    if (!viewEls[name]) return;
+    Object.keys(viewEls).forEach((k) => { viewEls[k].hidden = (k !== name); });
+    navItems.forEach((n) => n.classList.toggle('on', n.dataset.view === name));
+    if (lazyInit[name] && !loaded[name]) { loaded[name] = true; lazyInit[name](); }
+  }
+  document.querySelectorAll('[data-view]').forEach((el) => {
+    if (el.classList.contains('view')) return; // las secciones no navegan
+    el.addEventListener('click', () => showView(el.dataset.view));
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showView(el.dataset.view); } });
+  });
+
+  // ---------- confirm modal (promesa) para acciones que MODIFICAN el sistema ----------
+  const confirmSheet = $('confirmSheet');
+  let confirmResolve = null;
+  let confirmChain = Promise.resolve();
+  function sheetOpen() { return !!document.querySelector('.sheet.open'); }
+  // Las confirmaciones se ENCADENAN: una segunda llamada espera a que se cierre la primera (antes la pisaba y dejaba
+  // la promesa anterior sin resolver y el foco de retorno perdido).
+  function confirmDialog(title, body, danger) {
+    const run = () => new Promise((res) => {
+      $('confirmTitle').textContent = title;
+      $('confirmBody').textContent = body;
+      $('confirmYes').classList.toggle('danger', !!danger);
+      confirmResolve = res;
+      openSheet(confirmSheet, $('confirmYes'));
+    });
+    const p = confirmChain.then(run);
+    confirmChain = p.catch(() => {});
+    return p;
+  }
+  function closeConfirm(v) {
+    closeSheet(confirmSheet);
+    if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r(v); }
+  }
+  $('confirmYes').addEventListener('click', () => closeConfirm(true));
+  $('confirmNo').addEventListener('click', () => closeConfirm(false));
+  confirmSheet.addEventListener('click', (e) => { if (e.target === confirmSheet) closeConfirm(false); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && confirmSheet.classList.contains('open')) closeConfirm(false); });
+  const keyMap = { '1': 'panel', '2': 'telemetria', '3': 'optimizar', '4': 'sesion', '5': 'prueba', '6': 'seguridad', '7': 'ajustes' };
+  addEventListener('keydown', (e) => {
+    if (sheetOpen()) return;
+    // No robar teclas a los campos. SELECT entra en la lista por el selector de nivel de la sesión:
+    // sin él, teclear para elegir una opción («c» de congelar, o los dígitos) cambiaba de vista.
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+    const v = keyMap[e.key]; if (v) showView(v);
+  });
+
+  // ---------- Optimizar: catalogo real (tweaks.list) + aplicar/revertir ----------
+  const TIER_META = { 0: { label: 'Tier 0 · seguro', cls: 't0' }, 1: { label: 'Tier 1 · elite', cls: 't1' }, 2: { label: 'Tier 2 · extremo', cls: 't2' } };
+  const optBar = $('optBar');
+  function elt(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function setOptBar(msg, kind) { optBar.className = 'obar' + (kind ? ' ' + kind : ''); optBar.textContent = msg; }
+
+  function initOptimizar() {
+    setOptBar('cargando catálogo… (mide el estado real de cada tweak, puede tardar unos segundos)');
+    AXE.call('tweaks.list', {}).then((list) => renderCatalog(Array.isArray(list) ? list : []))
+      .catch((e) => setOptBar('No pude cargar el catálogo: ' + e.message, 'err'));
+  }
+
+  function renderCatalog(list) {
+    const host = $('optList'); host.textContent = '';
+    const appl = list.filter((t) => !t.blocked).length;
+    const on = list.filter((t) => t.applied && !t.blocked).length;
+    optBar.className = 'obar ok'; optBar.textContent = '';
+    optBar.appendChild(document.createTextNode(list.length + ' tweaks · '));
+    optBar.appendChild(elt('b', null, on + ' activos'));
+    optBar.appendChild(document.createTextNode(' de ' + appl + ' aplicables en este equipo · reversibles 1-a-1'));
+    [0, 1, 2].forEach((tier) => {
+      const items = list.filter((t) => t.tier === tier);
+      if (!items.length) return;
+      const meta = TIER_META[tier] || { label: 'Tier ' + tier, cls: 't' + tier };
+      const g = elt('div', 'tgroup');
+      const h = elt('div', 'tgroup-h ' + meta.cls);
+      h.appendChild(elt('span', 'dot'));
+      h.appendChild(elt('h2', null, meta.label));
+      const onN = items.filter((t) => t.applied && !t.blocked).length;
+      h.appendChild(elt('span', 'count', onN + '/' + items.length + ' activos'));
+      g.appendChild(h);
+      const grid = elt('div', 'tgrid');
+      items.forEach((t) => grid.appendChild(tweakCard(t)));
+      g.appendChild(grid);
+      host.appendChild(g);
+    });
+  }
+
+  function tweakCard(t) {
+    const meta = TIER_META[t.tier] || { cls: 't' + t.tier };
+    const card = elt('div', 'tw ' + meta.cls);
+    if (t.blocked) card.classList.add('blocked');
+    if (t.applied && !t.blocked) card.classList.add('on');
+    card.dataset.id = t.id;
+    const top = elt('div', 'tw-top');
+    top.appendChild(elt('div', 'tw-name', t.name));
+    // applied === null: estado no legible sin admin (lee BCD). Decir «inactivo» sería inventarlo.
+    const unknown = t.applied === null && !t.blocked;
+    const st = elt('span', 'tw-state' + (t.blocked ? ' blocked' : (t.applied ? ' on' : '')), t.blocked ? 'no aplicable' : (unknown ? 'estado ?' : (t.applied ? 'activo' : 'inactivo')));
+    if (unknown) st.title = 'Windows solo deja leer este ajuste (arranque/BCD) con permisos de administrador. Aplicar o revertir sí funciona (pide UAC).';
+    top.appendChild(st);
+    card.appendChild(top);
+    card.appendChild(elt('div', 'tw-desc', t.desc || ''));
+    const foot = elt('div', 'tw-foot');
+    const m = elt('div', 'tw-meta');
+    if (t.source) { const a = elt('a', 'badge src', t.sourceType === 'official' ? 'fuente oficial' : 'fuente'); a.href = t.source; a.target = '_blank'; a.rel = 'noopener'; m.appendChild(a); }
+    if (t.placebo) m.appendChild(elt('span', 'badge warn', 'placebo probable'));
+    if (t.reboot) m.appendChild(elt('span', 'badge reboot', 'reinicio'));
+    foot.appendChild(m);
+    if (t.blocked) {
+      foot.appendChild(elt('span', 'tw-blocked-why', t.blocked));
+    } else {
+      const act = elt('button', 'tw-act' + (t.applied ? ' revert' : ''), t.applied ? 'Revertir' : 'Aplicar');
+      act.addEventListener('click', () => toggleTweak(t, card, act, unknown ? true : !t.applied));
+      // Estado desconocido: se ofrecen las DOS acciones; forzar una sería adivinar el estado. Cada
+      // botón dice qué hace y lo hace: antes Revertir marcaba t.applied=true ANTES de llamar, y si el
+      // UAC se cancelaba el botón Aplicar quedaba mandando un revertir.
+      if (unknown) {
+        const rev = elt('button', 'tw-act revert', 'Revertir');
+        rev.addEventListener('click', () => toggleTweak(t, card, rev, false));
+        foot.appendChild(rev);
+      }
+      foot.appendChild(act);
+    }
+    card.appendChild(foot);
+    return card;
+  }
+
+  let masterBusy = false;   // un solo Master revert a la vez: los dos botones comparten el candado
+  async function toggleTweak(t, card, act, wantApply) {
+    if (wantApply && t.tier === 2) {
+      const ok = await confirmDialog('Tweak EXTREMO (Tier 2)', t.name + '\n\n' + (t.desc || '') + '\n\nOpt-in, de mayor riesgo. Es reversible, pero puede requerir reinicio. ¿Aplicar?', true);
+      if (!ok) return;
+    }
+    act.disabled = true; act.textContent = wantApply ? 'aplicando…' : 'revirtiendo…';
+    try {
+      // 25 min > los 20 min que espera el cliente del broker (Send-AXEBrokerRequest): la respuesta del broker (exito o error)
+      // llega SIEMPRE antes que el timeout del front; un timeout del front solo pasa con el puente muerto.
+      const r = await AXE.call(wantApply ? 'tweaks.apply' : 'tweaks.revert', { id: t.id }, 1500000);
+      t.applied = !!r.applied;
+      card.replaceWith(tweakCard(t));
+      // Solo se anuncia "Aplicado/Revertido" si el estado REAL lo confirma (r.applied lo comprueba el motor con Test).
+      const verified = wantApply ? !!r.applied : !r.applied;
+      if (verified) setOptBar((wantApply ? 'Aplicado' : 'Revertido') + ': ' + t.name + (r.reboot ? ' · requiere reinicio' : ''), 'ok');
+      else setOptBar('La orden terminó pero no pude comprobar que «' + t.name + '» ' + (wantApply ? 'esté activo' : 'esté desactivado') + ' (estado real: ' + (r.applied ? 'activo' : 'inactivo') + (r.reboot ? ' · puede requerir reinicio' : '') + ').', 'err');
+    } catch (e) {
+      act.disabled = false; act.textContent = wantApply ? 'Aplicar' : 'Revertir';
+      if (e.timedOut) {
+        setOptBar('Sin respuesta al ' + (wantApply ? 'aplicar' : 'revertir') + ' «' + t.name + '»: el sistema PUEDE haber cambiado. Actualizo el estado real…', 'err');
+        AXE.call('tweaks.list', {}).then((l) => renderCatalog(Array.isArray(l) ? l : [])).catch(() => {});
+      } else setOptBar('Error en ' + t.name + ': ' + e.message, 'err');
+    }
+  }
+
+  $('btnMasterRevert').addEventListener('click', async () => {
+    const ok = await confirmDialog('Master revert', 'Revierte TODOS los tweaks aplicados a su estado previo real (snapshot 1-a-1 + limpieza de residuos v1). Puede tardar y conviene reiniciar al terminar. ¿Continuar?', true);
+    if (!ok || masterBusy) return;
+    masterBusy = true;
+    const btn = $('btnMasterRevert'); btn.disabled = true;
+    setOptBar('revirtiendo todo… no cierres la ventana', null);
+    try {
+      const r = await AXE.call('tweaks.masterRevert', {}, 1500000);
+      setOptBar('Master revert: ' + r.reverted + ' revertidos' + (r.errors ? ' · ' + r.errors + ' con error (ver log)' : '') + ' · reinicia el PC', r.errors ? 'err' : 'ok');
+      AXE.call('tweaks.list', {}).then((l) => renderCatalog(Array.isArray(l) ? l : [])).catch(() => {});
+    } catch (e) {
+      if (e.timedOut) {
+        setOptBar('Master revert sin respuesta: puede haber revertido parte de los cambios. Actualizo el estado real…', 'err');
+        AXE.call('tweaks.list', {}).then((l) => renderCatalog(Array.isArray(l) ? l : [])).catch(() => {});
+      } else setOptBar('Master revert falló: ' + e.message, 'err');
+    } finally { btn.disabled = false; masterBusy = false; }
+  });
+
+  // ---------- Optimiza tu PC: un clic (spec 2026-09-24) ----------
+  // La orquesta el front con comandos que ya existen: bench.baseline → tweaks.applyBatch (broker,
+  // UN UAC, punto de restauración dentro) → optimize.save → bench.after, o reinicio y medir al
+  // volver. Los ids aplicados se guardan ANTES de medir el después: pase lo que pase con la
+  // medida, «Deshacer» sabe qué deshacer.
+  const OC = { profile: 'equilibrado', plan: null, busy: false, last: null, rebootPending: false };
+  const ocArr = (x) => (Array.isArray(x) ? x : (x == null ? [] : [x]));   // PS 5.1: array de 1 = objeto suelto
+  const OC_TAG = { mejor: ['mejora real', 'ok'], peor: ['empeora', 'bad'], ruido: ['dentro del ruido', 'unk'] };
+
+  function ocProfileItems(p) {
+    const pl = OC.plan || {};
+    const base = ocArr(pl.t0).concat(p === 'seguro' ? [] : ocArr(pl.t1));
+    return { base: base, t2: p === 'maximo' ? ocArr(pl.t2) : [] };
+  }
+  function ocLock(on) {
+    OC.busy = on;
+    document.querySelectorAll('#ocProfiles .oc-p').forEach((b) => { b.disabled = on; });
+    $('ocUndo').disabled = on;
+    ocRenderGo();
+  }
+  function ocRenderGo() {
+    const go = $('ocGo'), sub = $('ocGoSub');
+    if (!OC.plan) { go.disabled = true; return; }
+    const it = ocProfileItems(OC.profile), n = it.base.length + it.t2.length;
+    go.disabled = OC.busy;
+    go.classList.toggle('busy', OC.busy);
+    sub.textContent = OC.busy ? 'en curso…' : (n ? n + (n === 1 ? ' cambio pendiente' : ' cambios pendientes') : 'nada pendiente');
+  }
+  function ocRenderPlan() {
+    document.querySelectorAll('#ocProfiles .oc-p').forEach((b) => {
+      const it = ocProfileItems(b.dataset.p), n = it.base.length + it.t2.length;
+      b.querySelector('.oc-n').textContent = OC.plan ? String(n) : '—';
+      const on = b.dataset.p === OC.profile;
+      b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.tabIndex = on ? 0 : -1;   // tabindex itinerante: un solo tope de Tab, las flechas mueven la seleccion
+    });
+    ocRenderGo();
+  }
+  function ocLoadPlan() {
+    return AXE.call('optimize.plan', {}).then((p) => { OC.plan = p || { t0: [], t1: [], t2: [] }; ocRenderPlan(); })
+      .catch((e) => { OC.plan = null; ocRenderPlan(); $('ocGoSub').textContent = 'no disponible'; ocMsg('No pude calcular qué falta por aplicar: ' + e.message, 'err'); });
+  }
+  // OC.note = aviso que debe seguir visible aunque otro paso escriba un mensaje nuevo (p. ej. cambios sin verificar).
+  function ocMsg(text, kind) { const m = $('ocMsg'); m.hidden = !text; m.className = 'oc-msg' + (kind ? ' ' + kind : ''); m.textContent = text ? text + (OC.note && text !== OC.note ? ' · ' + OC.note : '') : ''; }
+  function ocSteps(labels, current, detail) {
+    const host = $('ocSteps'); host.textContent = '';
+    host.hidden = !labels;
+    (labels || []).forEach((l, i) => {
+      const li = elt('li', i < current ? 'done' : (i === current ? 'now' : ''), (i === current && detail) ? detail : l);
+      host.appendChild(li);
+    });
+  }
+  function ocClearResult() { $('ocResult').hidden = true; $('ocResult').textContent = ''; $('ocReport').hidden = true; ocRenderUndo(); }
+  function ocRenderUndo() {
+    const ids = OC.last ? ocArr(OC.last.ids) : [];
+    $('ocUndo').hidden = !ids.length;
+    $('ocUndo').textContent = 'Deshacer esta optimización' + (ids.length ? ' (' + ids.length + ')' : '');
+    $('ocFoot').hidden = $('ocUndo').hidden && $('ocReport').hidden;
+  }
+  function ocSave(extra) {
+    const l = OC.last || {};
+    return AXE.call('optimize.save', Object.assign({ profile: l.profile, benchId: l.benchId || '', applied: ocArr(l.ids), rebootNeeded: false, done: false }, extra));
+  }
+  function ocRefreshCatalog() { if (loaded.optimizar) AXE.call('tweaks.list', {}).then((l) => renderCatalog(Array.isArray(l) ? l : [])).catch(() => {}); }
+
+  // Qué se aplicó, qué falló y por qué, y el punto de restauración si no se pudo crear.
+  function ocRenderApplied(results, rp) {
+    const box = $('ocResult'); box.hidden = false;
+    const ok = results.filter((r) => r.ok), bad = results.filter((r) => !r.ok);
+    box.appendChild(elt('div', 'oc-applied', ok.length + (ok.length === 1 ? ' cambio aplicado' : ' cambios aplicados') + (bad.length ? ' · ' + bad.length + ' no se pudieron aplicar' : '')));
+    bad.forEach((r) => box.appendChild(elt('div', 'oc-fail', r.id + ': ' + (r.err || 'error desconocido'))));
+    if (rp && rp.status && rp.status !== 'ok') box.appendChild(elt('div', 'oc-warn', 'Punto de restauración: ' + (rp.message || 'no se pudo crear') + '. Cada cambio sigue siendo reversible uno a uno.'));
+  }
+  function ocFmt(v) { return (v == null || isNaN(Number(v))) ? '—' : Number(v).toLocaleString('es-ES', { maximumFractionDigits: 3 }); }
+  function ocRenderVerdict(r) {
+    const box = $('ocResult'); box.hidden = false;
+    const rows = ocArr(r && r.verdict);
+    if (!rows.length) box.appendChild(elt('div', 'oc-warn', 'La medida no dio métricas comparables.'));
+    rows.forEach((v) => {
+      const t = OC_TAG[v.tag] || [v.tag || '?', 'unk'];
+      const row = elt('div', 'oc-row ' + t[1]);
+      row.appendChild(elt('span', 'oc-l', v.label || v.key));
+      row.appendChild(elt('span', 'oc-v', ocFmt(v.before) + ' → ' + ocFmt(v.after) + (v.unit ? ' ' + v.unit : '')));
+      const tag = elt('span', 'oc-tag ' + t[1], t[0]); tag.title = v.reason || ''; row.appendChild(tag);
+      box.appendChild(row);
+    });
+    const lines = ocArr(r && r.lines);
+    $('ocReportBody').textContent = lines.join('\n') || '—';
+    $('ocReport').hidden = !lines.length;
+    ocRenderUndo();
+  }
+
+  async function ocMeasureAfter(benchId) {
+    try {
+      const r = await AXE.call('bench.after', { id: benchId }, 180000);
+      ocSteps(null); ocRenderVerdict(r);
+      ocMsg('Hecho. Esto es lo que ha cambiado en este equipo, medido antes y después.', 'ok');
+    } catch (e) {
+      ocSteps(null);
+      ocMsg('Los cambios están aplicados, pero no pude medir el después: ' + e.message + '. Puedes deshacerlos igualmente.', 'warn');
+    }
+    // done=true tras enseñar el resultado (o el motivo): al reabrir no se vuelve a medir en bucle.
+    try { await ocSave({ done: true }); } catch (e) { /* el resultado ya está en pantalla */ }
+  }
+
+  // Máximo: los Tier 2 se revisan antes. Devuelve los marcados, o null si se cancela.
+  function ocPickT2(items) {
+    const list = $('ocT2List'); list.textContent = '';
+    items.forEach((t) => {
+      const lab = elt('label', 'oc-t2-item');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = true; cb.value = t.id;
+      lab.appendChild(cb);
+      const txt = elt('div', 'oc-t2-txt');
+      txt.appendChild(elt('b', null, t.name + (t.reboot ? ' · reinicio' : '')));
+      txt.appendChild(elt('span', null, t.desc || ''));
+      lab.appendChild(txt);
+      list.appendChild(lab);
+    });
+    const sh = $('ocSheet'); openSheet(sh, $('ocT2Ok'));
+    return new Promise((res) => {
+      const done = (v) => { closeSheet(sh); $('ocT2Ok').onclick = null; $('ocT2No').onclick = null; sh.onclick = null; document.removeEventListener('keydown', onKey); res(v); };
+      const onKey = (e) => { if (e.key === 'Escape') done(null); };
+      $('ocT2Ok').onclick = () => { const on = new Set([...list.querySelectorAll('input:checked')].map((c) => c.value)); done(items.filter((t) => on.has(t.id))); };
+      $('ocT2No').onclick = () => done(null);
+      sh.onclick = (e) => { if (e.target === sh) done(null); };
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  async function ocRun() {
+    if (OC.busy || !OC.plan) return;
+    // Una optimizacion que pidio reinicio y aun no se ha reiniciado: otra encima pisaria su registro
+    // (y con el, su Deshacer y su medida del despues). Primero reiniciar, o deshacerla.
+    if (OC.unknown) { ocMsg('Una operación anterior terminó sin respuesta y el sistema puede haber cambiado. Reinicia AXE para comprobar el estado real antes de lanzar otra optimización.', 'warn'); return; }
+    if (OC.rebootPending) { ocMsg('Tienes una optimización a medias: reinicia el PC para completarla antes de lanzar otra. Si prefieres, puedes deshacerla.', 'warn'); return; }
+    const profile = OC.profile, it = ocProfileItems(profile);
+    OC.note = ''; ocClearResult(); ocMsg('');
+    if (!it.base.length && !it.t2.length) { ocMsg('Ya optimizado con este perfil: no queda nada pendiente en este equipo.', 'ok'); return; }
+    ocLock(true);
+    try {
+      const labels = ['Midiendo tu PC'].concat(it.t2.length ? ['Revisar cambios extremos'] : []).concat(['Aplicando cambios', 'Midiendo de nuevo']);
+      let step = 0;
+      ocSteps(labels, step, 'Midiendo tu PC… (~10-30 s, no toques el equipo)');
+      let base;
+      try { base = await AXE.call('bench.baseline', {}, 180000); }
+      catch (e) { ocSteps(null); ocMsg('No pude medir tu PC, así que no he aplicado nada (sin un «antes» no hay prueba): ' + e.message, 'err'); return; }
+      step++;
+      let items = it.base;
+      if (it.t2.length) {
+        ocSteps(labels, step);
+        const pick = await ocPickT2(it.t2);
+        if (pick === null) { ocSteps(null); ocMsg('Cancelado, no se ha cambiado nada.', 'warn'); return; }
+        items = items.concat(pick); step++;
+      }
+      if (!items.length) { ocSteps(null); ocMsg('No has dejado ningún cambio marcado: no se ha cambiado nada.', 'warn'); return; }
+      ocSteps(labels, step, 'Aplicando ' + items.length + (items.length === 1 ? ' cambio' : ' cambios') + '… acepta el aviso de Windows');
+      let res;
+      try { res = await AXE.call('tweaks.applyBatch', { ids: items.map((t) => t.id) }, 1500000); }
+      catch (e) {
+        ocSteps(null);
+        if (e.timedOut) { OC.unknown = true; ocRefreshCatalog(); ocMsg('El lote de cambios no respondió: el sistema PUEDE haber aplicado parte o todo. No lances otra optimización hasta reiniciar AXE y comprobar el estado real.', 'err'); return; }
+        if (/cancelad/i.test(e.message)) ocMsg('Cancelado, no se ha cambiado nada.', 'warn');
+        else ocMsg('No se pudo aplicar: ' + e.message + '. No se ha guardado nada como aplicado.', 'err');
+        return;
+      }
+      const results = ocArr(res && res.results);
+      const okIds = results.filter((r) => r.ok).map((r) => r.id);
+      const reboot = results.filter((r) => r.ok && r.reboot).length;
+      const unverified = results.filter((r) => r.ok && r.applied === false).length;
+      OC.last = { ids: okIds, profile: profile, benchId: base.id };
+      try { await ocSave({ rebootNeeded: reboot > 0 }); }
+      catch (e) { ocMsg('Aplicado, pero no pude guardar el registro (' + e.message + '): «Deshacer» solo funcionará mientras no cierres AXE.', 'warn'); }
+      ocRenderApplied(results, res && res.restorePoint); ocRenderUndo();
+      if (unverified) { const note = 'ATENCIÓN: ' + unverified + (unverified === 1 ? ' cambio terminó' : ' cambios terminaron') + ' sin que pudiera comprobar que quedaran activos (ver el detalle abajo).'; ocMsg(note, 'warn'); OC.note = note; }
+      ocRefreshCatalog();
+      if (!okIds.length) { ocSteps(null); ocMsg('No se pudo aplicar ningún cambio. Abajo, el motivo de cada uno.', 'err'); try { await ocSave({ done: true }); } catch (e) {} return; }
+      if (reboot) {
+        ocSteps(null);
+        OC.rebootPending = true;
+        ocMsg('Reinicia para completar: ' + reboot + (reboot === 1 ? ' cambio lo necesita' : ' cambios lo necesitan') + '. Al volver a abrir AXE mediré el después solo.', 'warn');
+        return;
+      }
+      step++;
+      ocSteps(labels, step, 'Midiendo de nuevo… (~10-30 s)');
+      await ocMeasureAfter(base.id);
+    } finally { ocLock(false); ocLoadPlan(); }
+  }
+
+  async function ocUndo() {
+    const ids = OC.last ? ocArr(OC.last.ids) : [];
+    if (OC.busy || !ids.length) return;
+    const ok = await confirmDialog('Deshacer esta optimización', 'Revierte los ' + ids.length + ' cambios que aplicó este clic a su valor anterior real (nada más). Pide un aviso de Windows.', true);
+    if (!ok) return;
+    OC.note = '';   // el aviso de cambios sin verificar era de la optimizacion que se acaba de deshacer
+    ocLock(true); ocMsg('Deshaciendo… acepta el aviso de Windows', null);
+    try {
+      const r = await AXE.call('tweaks.revertBatch', { ids: ids }, 1500000);
+      const res = ocArr(r && r.results), bad = res.filter((x) => !x.ok), reboot = res.some((x) => x.ok && x.reboot);
+      try { await ocSave({ applied: bad.map((x) => x.id), rebootNeeded: reboot, done: bad.length === 0 }); } catch (e) {}
+      OC.last = bad.length ? Object.assign({}, OC.last, { ids: bad.map((x) => x.id) }) : null;
+      OC.rebootPending = false;   // esta optimizacion ya no espera reinicio para medirse: se ha deshecho
+      ocClearResult();
+      ocMsg((res.length - bad.length) + ' cambios deshechos' + (bad.length ? ' · ' + bad.length + ' fallaron: ' + bad.map((x) => x.id + ' (' + (x.err || 'error') + ')').join(', ') : '') + (reboot ? ' · reinicia para completar' : ''), bad.length ? 'err' : 'ok');
+      ocRefreshCatalog();
+    } catch (e) {
+      if (e.timedOut) { OC.unknown = true; ocRefreshCatalog(); ocMsg('Deshacer no respondió: puede haber revertido parte de los cambios. Reinicia AXE para comprobar el estado real.', 'err'); return; }
+      ocMsg(/cancelad/i.test(e.message) ? 'Cancelado, no se ha revertido nada.' : 'No se pudo deshacer: ' + e.message, /cancelad/i.test(e.message) ? 'warn' : 'err');
+    } finally { ocLock(false); ocRenderUndo(); ocLoadPlan(); }
+  }
+
+  function initOneClick() {
+    document.querySelectorAll('#ocProfiles .oc-p').forEach((b) => b.addEventListener('click', () => { if (OC.busy) return; OC.profile = b.dataset.p; ocRenderPlan(); }));
+    // Patron WAI-ARIA de radiogroup: flechas/Inicio/Fin mueven la seleccion Y el foco.
+    $('ocProfiles').addEventListener('keydown', (e) => {
+      const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1, Home: 'first', End: 'last' };
+      if (!(e.key in keys) || OC.busy) return;
+      const radios = [...document.querySelectorAll('#ocProfiles .oc-p')];
+      let i = radios.findIndex((r) => r.dataset.p === OC.profile); if (i < 0) i = 0;
+      const step = keys[e.key];
+      i = step === 'first' ? 0 : step === 'last' ? radios.length - 1 : (i + step + radios.length) % radios.length;
+      e.preventDefault();
+      OC.profile = radios[i].dataset.p; ocRenderPlan(); radios[i].focus();
+    });
+    $('ocGo').addEventListener('click', ocRun);
+    $('ocUndo').addEventListener('click', ocUndo);
+    $('ocReport').addEventListener('click', () => openSheet($('ocReportSheet'), $('ocReportClose')));
+    $('ocReportClose').addEventListener('click', () => closeSheet($('ocReportSheet')));
+    $('ocReportSheet').addEventListener('click', (e) => { if (e.target === $('ocReportSheet')) closeSheet($('ocReportSheet')); });
+    addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet($('ocReportSheet')); });
+    ocLoadPlan();
+    // Optimización pendiente de medir (tras reiniciar, o si se cerró la ventana a mitad): se mide sola.
+    // Si pedía reinicio y el PC aún no se ha reiniciado, NO se mide (saldría un 'después' falso):
+    // se recuerda que falta reiniciar y se bloquea otra optimización encima.
+    AXE.call('optimize.pending', {}).then(async (p) => {
+      if (!p) return;
+      if (p.corrupt) { ocMsg('No pude leer el registro de la última optimización (fichero dañado). Tus ajustes siguen como estén: puedes revertirlos en Optimizar.', 'warn'); return; }
+      OC.last = { ids: ocArr(p.applied), profile: p.profile, benchId: p.benchId };
+      ocRenderUndo();
+      if (p.rebootNeeded && p.rebooted === false) {
+        OC.rebootPending = true;
+        ocMsg('Tu última optimización necesita reiniciar el PC para completarse. Reinicia y, al volver a abrir AXE, mediré el después solo. También puedes deshacerla.', 'warn');
+        return;
+      }
+      if (!p.benchId || OC.busy) return;
+      ocLock(true);
+      try { ocSteps(['Midiendo el después'], 0, 'Midiendo el después de tu última optimización… (~10-30 s)'); await ocMeasureAfter(p.benchId); }
+      finally { ocLock(false); ocRenderUndo(); }
+    }).catch(() => {});
+  }
+  initOneClick();
+
+  // ================= Fase 7: vistas =================
+  // Telemetría: barrido de timer bajo demanda (el jitter en vivo lo pinta el handler de telemetría
+  // sobre #teleScope, reusando el mismo feed real; no se duplica el muestreo).
+  function initTele() {
+    const b = $('btnSweep');
+    b.addEventListener('click', () => {
+      const out = $('sweepOut');
+      out.textContent = 'midiendo barrido… (~15-60 s · prioridad alta · no cierres la ventana)';
+      b.disabled = true; b.classList.add('busy');
+      // Corre en un runspace de fondo (la ventana sigue respondiendo) pero tarda decenas de
+      // segundos: el timeout por defecto de 15 s lo daba por fallido a mitad de medida.
+      // 900 s: el worker es de UN solo hueco; si hay otro comando lento delante (net.probe, advisor...) el barrido espera en
+      // cola y el plazo corre desde que se envia. Un timeout NO es un fallo de medida: el barrido puede seguir vivo.
+      AXE.call('measure.timerSweep', {}, 900000).then((r) => {
+        out.textContent = (r.lines || []).join('\n');
+      }).catch((e) => {
+        out.textContent = e.timedOut
+          ? 'Sin respuesta del barrido tras 15 min. Puede seguir en cola o midiendo: espera a que termine otra medida y reintenta.'
+          : 'No se pudo medir el barrido: ' + e.message;
+      })
+        .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+    });
+
+    // Red en vivo: ping, jitter de RED y pérdida. Ojo con el nombre — el osciloscopio de arriba
+    // pinta jitter de TIMER (despertar del scheduler). Son cosas distintas y la tarjeta lo dice
+    // en su subtítulo: mezclarlas sería justo la métrica de vanidad que este proyecto evita.
+    const bn = $('btnNet');
+    bn.addEventListener('click', () => {
+      const out = $('netOut');
+      out.textContent = 'sondeando… (20 paquetes a tu router y a internet · ~5-10 s)';
+      bn.disabled = true; bn.classList.add('busy');
+      AXE.call('net.probe', {}).then((r) => {
+        out.textContent = (r.lines || []).join('\n');
+        renderNetFindings(r.findings || []);
+      }).catch((e) => { out.textContent = 'No se pudo medir la red: ' + e.message; $('netFinds').textContent = ''; })
+        .finally(() => { bn.disabled = false; bn.classList.remove('busy'); });
+    });
+
+    // Sin esto el handler de telemetría nunca pintaba este osciloscopio: quedaba en «esperando muestreo…».
+    teleLoaded = true;
+    if (scopeBuf.length) drawScope($('teleScope'));
+  }
+
+  // Hallazgos de red. textContent y no innerHTML: el texto lo compone el motor, pero interpola
+  // en él el nombre del adaptador, que sale del sistema y no es una constante nuestra.
+  function renderNetFindings(finds) {
+    const host = $('netFinds');
+    host.textContent = '';
+    for (const f of finds) {
+      const el = document.createElement('div');
+      el.className = 'netfind ' + (f.sev === 'ERR' ? 'bad' : f.sev === 'WARN' ? 'warn' : 'ok');
+      el.textContent = f.msg;
+      host.appendChild(el);
+    }
+  }
+
+  // Prueba y receta: A/B antes→después (baseline + report reales del motor) + FPS + diagnóstico.
+  function initPrueba() {
+    $('btnBaseline').addEventListener('click', () => {
+      const b = $('btnBaseline'); b.disabled = true; b.classList.add('busy');
+      $('pruebaBar').textContent = 'midiendo línea base… (~1 s)';
+      AXE.call('prueba.baseline', {}).then((s) => {
+        $('baseScore').textContent = s.total;
+        $('baseTimer').textContent = (s.timerMs != null) ? (s.timerMs + ' ms') : 'n/a';
+        $('baseJit').textContent = fmtMs(s.jitterP999);
+        const tag = $('baseTag'); tag.textContent = 'capturado ' + (s.ts ? relTime(s.ts) : 'ahora'); tag.className = 'ab-tag ok';
+        $('btnReport').disabled = false; $('btnReport').querySelector('span').textContent = 'antes → después';
+        $('pruebaBar').textContent = 'línea base lista · aplica cambios en Optimizar (3), vuelve y mide el después';
+      }).catch((e) => { $('pruebaBar').textContent = 'No pude medir baseline: ' + e.message; })
+        .finally(() => { $('btnBaseline').disabled = false; $('btnBaseline').classList.remove('busy'); });
+    });
+    $('btnReport').addEventListener('click', () => {
+      const b = $('btnReport'); b.disabled = true; b.classList.add('busy');
+      $('reportOut').textContent = 'midiendo después + generando informe…';
+      AXE.call('prueba.report', {}).then((r) => {
+        $('afterScore').textContent = r.after;
+        $('afterTimer').textContent = (r.afterTimerMs != null) ? (r.afterTimerMs + ' ms') : 'n/a';
+        $('afterJit').textContent = fmtMs(r.afterJitterP999);
+        const tag = $('afterTag'); tag.textContent = 'medido'; tag.className = 'ab-tag ok';
+        $('reportOut').textContent = (r.lines || []).join('\n');
+      }).catch((e) => { $('reportOut').textContent = 'No pude generar el informe: ' + e.message; })
+        .finally(() => { $('btnReport').disabled = false; $('btnReport').classList.remove('busy'); });
+    });
+    // Benchmark con reinicio (subproyecto C). Distinto de baseline/report de arriba: aquel
+    // compara dos snapshots de ESTA sesión; éste agrega N pasadas, mide el ruido y guarda el
+    // «antes» en disco para que sobreviva al reinicio. El id se rellena solo tras el paso 1,
+    // pero el campo es editable a propósito: tras reiniciar la ventana es nueva y el usuario
+    // llega con el id apuntado (o lo saca de AXE/bench/).
+    $('btnBenchBase').addEventListener('click', () => {
+      const b = $('btnBenchBase'), out = $('benchOut');
+      b.disabled = true; b.classList.add('busy');
+      out.textContent = 'midiendo la línea base… (~10-30 s · no toques el equipo)';
+      AXE.call('bench.baseline', {}).then((r) => {
+        $('benchId').value = r.id || '';
+        out.textContent = (r.lines || []).join('\n') +
+          '\n\nLínea base guardada con id: ' + r.id +
+          '\nAplica tus cambios, REINICIA el PC, vuelve aquí y pulsa «Medir después».';
+      }).catch((e) => { out.textContent = 'No pude medir la línea base: ' + e.message; })
+        .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+    });
+    $('btnBenchAfter').addEventListener('click', () => {
+      const id = $('benchId').value.trim(), out = $('benchOut');
+      if (!id) { out.textContent = 'Escribe el id de la línea base (te lo dio el paso 1).'; $('benchId').focus(); return; }
+      const b = $('btnBenchAfter'); b.disabled = true; b.classList.add('busy');
+      out.textContent = 'midiendo el después y comparando contra el ruido… (~10-30 s)';
+      AXE.call('bench.after', { id: id }).then((r) => {
+        out.textContent = (r.lines || []).join('\n');
+      }).catch((e) => { out.textContent = 'No pude comparar: ' + e.message; })
+        .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+    });
+    $('btnFps').addEventListener('click', () => {
+      const proc = $('fpsProc').value.trim();
+      const out = $('fpsOut'); out.hidden = false;
+      if (!proc) { out.textContent = 'Escribe el nombre del proceso del juego (ej: cs2).'; $('fpsProc').focus(); return; }
+      let secs = parseInt($('fpsSecs').value, 10); if (!(secs >= 3)) secs = 20;
+      const b = $('btnFps'); b.disabled = true; b.classList.add('busy');
+      out.textContent = 'capturando ' + secs + ' s… pon el juego en la escena a medir';
+      // la captura dura 'secs' (hasta 120) + arranque de PresentMon + cola del worker
+      AXE.call('fps.capture', { process: proc, seconds: secs }, (secs + 120) * 1000).then((r) => {
+        out.textContent = (r.lines || []).join('\n');
+      }).catch((e) => { out.textContent = 'No pude capturar: ' + e.message; })
+        .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+    });
+    $('btnDiag').addEventListener('click', () => {
+      const b = $('btnDiag'); b.disabled = true; b.classList.add('busy');
+      $('diagList').textContent = ''; $('diagOut').hidden = true;
+      AXE.call('diag.get', {}).then((r) => renderDiag(r))
+        .catch((e) => { const o = $('diagOut'); o.hidden = false; o.textContent = 'No pude diagnosticar: ' + e.message; })
+        .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+    });
+    $('btnAdvice').addEventListener('click', () => {
+      const b = $('btnAdvice'); b.disabled = true; b.classList.add('busy');
+      // Se avisa de la espera: arrastra el diagnóstico y una medición de jitter de ~1 s. Un botón
+      // que se queda mudo dos segundos parece roto, y esta pantalla no puede permitírselo.
+      $('adviceList').textContent = '';
+      $('adviceFoot').textContent = 'midiendo y cruzando datos… (un par de segundos, no aplica nada)';
+      AXE.call('advisor.get', {}).then(renderAdvice)
+        .catch((e) => { $('adviceFoot').textContent = 'No pude aconsejar: ' + e.message; })
+        .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+    });
+  }
+  // Consejero. Reusa el markup .finding del diagnóstico a propósito: es la misma clase de
+  // información (un hallazgo con severidad), y dos estilos distintos para lo mismo enseñarían al
+  // usuario a leerlos como si fueran cosas diferentes.
+  //   El color va por IMPACTO, no por tipo: un cuello de botella es rojo aunque AXE no lo pueda
+  // arreglar, y los ajustes del catálogo son neutros aunque sí pueda. Pintar de verde lo que
+  // vendes y de gris lo que no sería exactamente al revés de lo que le conviene a quien lee.
+  const ADV_CLS = { cuello: 'bad', revisar: 'bad', catalogo: 'unk', 'sin comprobar': 'unk' };
+
+  function renderAdvice(r) {
+    const host = $('adviceList'); host.textContent = '';
+    const foot = $('adviceFoot');
+    const plan = (r && r.plan) ? r.plan : [];
+    if (!plan.length) {
+      host.appendChild(elt('div', 'mini', 'sin datos suficientes para aconsejar. Ejecuta antes el diagnóstico.'));
+      foot.textContent = '';
+      return;
+    }
+    plan.forEach((p) => {
+      const cls = ADV_CLS[p.kind] || 'unk';
+      const card = elt('div', 'finding ' + cls);
+      const top = elt('div', 'finding-top');
+      top.appendChild(elt('span', 'finding-dot'));
+      top.appendChild(elt('div', 'finding-title', p.order + '. ' + (p.title || '')));
+      top.appendChild(elt('span', 'finding-badge ' + cls, p.kind || ''));
+      card.appendChild(top);
+      if (p.detail) card.appendChild(elt('div', 'finding-detail', p.detail));
+      card.appendChild(elt('div', 'finding-est', 'efecto: ' + p.impact + ' · base: ' + p.why + ' · acción: ' + p.action));
+      host.appendChild(card);
+    });
+    // El recuento del histórico no es decoración: dice cuánto vale lo que acabas de leer.
+    const n = r.samples || 0;
+    foot.textContent = n < 2
+      ? 'Histórico local: ' + n + ' medición. Esta lista se afina cada vez que la pides: AXE compara tu score con cada ajuste puesto y sin él, en esta máquina.'
+      : 'Histórico local: ' + n + ' mediciones en este equipo. Comparación observacional, no un experimento controlado: con menos de 3 medidas a cada lado no se afirma nada.';
+  }
+
+  function renderDiag(r) {
+    const host = $('diagList'); host.textContent = '';
+    const finds = (r && r.findings) ? r.findings : [];
+    if (!finds.length) { const o = $('diagOut'); o.hidden = false; o.textContent = (r && r.lines ? r.lines.join('\n') : 'sin hallazgos'); return; }
+    finds.forEach((f) => {
+      const st = String(f.status || '').toLowerCase();
+      const cls = st === 'bad' ? 'bad' : (st === 'ok' ? 'ok' : 'unk');
+      const card = elt('div', 'finding ' + cls);
+      const top = elt('div', 'finding-top');
+      top.appendChild(elt('span', 'finding-dot'));
+      top.appendChild(elt('div', 'finding-title', f.title || ''));
+      top.appendChild(elt('span', 'finding-badge ' + cls, st === 'bad' ? 'mal' : (st === 'ok' ? 'ok' : '?')));
+      card.appendChild(top);
+      if (f.detail) card.appendChild(elt('div', 'finding-detail', f.detail));
+      if (st === 'bad') {
+        if (f.fix) { const fx = elt('div', 'finding-fix'); fx.appendChild(elt('b', null, 'Arreglo: ')); fx.appendChild(document.createTextNode(f.fix)); card.appendChild(fx); }
+        if (f.estPct) card.appendChild(elt('div', 'finding-est', 'en juego: ' + f.estPct + ' · estimación típica, no medida en esta máquina'));
+      }
+      host.appendChild(card);
+    });
+  }
+
+  // Seguridad: punto de restauración (best-effort, honesto si el SO lo bloquea) + master revert.
+  function initSeguridad() {
+    $('btnRestore').addEventListener('click', () => {
+      const b = $('btnRestore'); b.disabled = true; b.classList.add('busy');
+      $('segRpState').textContent = 'creando…'; $('rpDot').className = 'dot';
+      AXE.call('safety.restorePoint', {}, 90000).then((r) => {
+        const ok = r.status === 'ok', fb = r.status === 'fallback';
+        $('segRpState').textContent = ok ? 'creado' : (fb ? 'no disponible' : 'error');
+        $('rpDot').className = 'dot ' + (ok ? 'ok' : (fb ? 'warn' : 'err'));
+        $('segRpMsg').textContent = r.message || '—';
+        const rs = $('rpState'); if (rs) { rs.textContent = ok ? 'creado' : (fb ? 'no disp.' : 'error'); rs.className = ok ? 'ok' : 'neutral'; }
+        const rd = $('rpDetail'); if (rd) rd.textContent = r.message || '';
+      }).catch((e) => { $('segRpState').textContent = 'error'; $('rpDot').className = 'dot err'; $('segRpMsg').textContent = e.message; })
+        .finally(() => { $('btnRestore').disabled = false; $('btnRestore').classList.remove('busy'); });
+    });
+    $('btnSegMaster').addEventListener('click', async () => {
+      const ok = await confirmDialog('Master revert', 'Revierte TODOS los tweaks aplicados a su estado previo real (snapshot 1-a-1 + limpieza de residuos). Puede tardar y conviene reiniciar al terminar. ¿Continuar?', true);
+      if (!ok) return;
+      if (masterBusy) return;
+      masterBusy = true;
+      const b = $('btnSegMaster'); b.disabled = true;
+      const msg = $('segMasterMsg'); msg.hidden = false; msg.textContent = 'revirtiendo todo… no cierres la ventana';
+      try {
+        const r = await AXE.call('tweaks.masterRevert', {}, 1500000);
+        msg.textContent = 'Master revert: ' + r.reverted + ' revertidos' + (r.errors ? ' · ' + r.errors + ' con error (ver log)' : '') + ' · reinicia el PC';
+        if (loaded.optimizar) AXE.call('tweaks.list', {}).then((l) => renderCatalog(Array.isArray(l) ? l : [])).catch(() => {});
+      } catch (e) {
+        if (e.timedOut) {
+          msg.textContent = 'Master revert sin respuesta: puede haber revertido parte de los cambios. Actualizo el estado real…';
+          AXE.call('tweaks.list', {}).then((l) => { if (loaded.optimizar) renderCatalog(Array.isArray(l) ? l : []); }).catch(() => {});
+        } else msg.textContent = 'Master revert falló: ' + e.message;
+      }
+      finally { b.disabled = false; masterBusy = false; }
+    });
+  }
+
+  // ---------- Sesión de juego (subsistema A · spec 2026-07-25) ----------
+  // El dueño del ciclo de vida es el motor (40-session): aquí sólo se previsualiza, se arranca/para
+  // y se sondea session.status cada 2 s — que es la llamada en la que el motor detecta que el juego
+  // murió y cierra la sesión él mismo. Sin lógica de reparto en el frontend: los niveles los decide
+  // Get-AXESessionPlan y llegan ya resueltos, así que esta pantalla no puede contradecir al motor.
+  const S_LEVELS = ['congelado', 'degradado', 'intacto'];
+  const S_META = { congelado: { cls: 't2', label: 'congelar' }, degradado: { cls: 't1', label: 'degradar' }, intacto: { cls: 't0', label: 'intacto' } };
+  let sessPoll = null, sessActive = false;
+
+  function setSessBar(msg, kind) { const b = $('sessBar'); b.className = 'obar' + (kind ? ' ' + kind : ''); b.textContent = msg; }
+  function fmtDur(s) {
+    if (s == null) return '—';
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+    return (h ? h + ' h ' : '') + (h || m ? m + ' min ' : '') + x + ' s';
+  }
+
+  // Smart detect. El motor puntúa y devuelve las RAZONES; aquí sólo se pintan. Deliberadamente no
+  // se arranca nada solo: rellenar el campo es ayudar, congelar 20 procesos por tu cuenta es otra
+  // cosa. Todo el texto entra por textContent (elt) porque nombres, títulos y rutas los pone el
+  // sistema, no nosotros.
+  function sessDetect() {
+    const b = $('btnSessDetect'); b.disabled = true; b.classList.add('busy');
+    setSessBar('buscando el juego entre los procesos abiertos… (sólo lectura, no toca nada)');
+    AXE.call('session.detect', { top: 8 }).then(renderSessCands)
+      .catch((e) => setSessBar('No pude detectar: ' + e.message, 'err'))
+      .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+  }
+
+  function renderSessCands(r) {
+    const host = $('sessCands'); host.textContent = '';
+    const list = (r && r.candidates) || [];
+    if (!list.length) {
+      host.appendChild(elt('div', 'mini', 'ningún proceso abierto parece un juego. Ábrelo y vuelve a pulsar Detectar, o escribe el nombre a mano.'));
+      setSessBar('no encontré ningún candidato. ¿Está el juego abierto?', 'warn');
+      return;
+    }
+    list.forEach((c) => {
+      // Verde sólo para lo probable. Un candidato flojo pintado igual que uno fuerte sería decirle
+      // al usuario que confíe lo mismo en los dos, y no es verdad.
+      const row = elt('div', 'sapp ' + (c.likely ? 't0' : 't1'));
+      const left = elt('div', 'sapp-name');
+      left.appendChild(elt('b', '', c.name));
+      if (c.instances > 1) left.appendChild(elt('span', 'sapp-n', '×' + c.instances + ' procesos'));
+      left.appendChild(elt('span', 'sapp-n', (c.likely ? 'probable' : 'poco probable') + ' · ' + (c.reasons || []).join(' · ')));
+      row.appendChild(left);
+      const pick = elt('button', 'slevel', 'usar');
+      pick.addEventListener('click', () => { $('sessGame').value = c.name; sessPreview(false); });
+      row.appendChild(pick);
+      if (c.path) row.title = c.path;   // la ruta completa, para que puedas desmentir al detector
+      host.appendChild(row);
+    });
+    const top = list[0];
+    if (top.likely) {
+      $('sessGame').value = top.name;
+      setSessBar('candidato más probable: «' + top.name + '» — ' + (top.reasons || []).join(' · ') + '. Pulsa Previsualizar para ver qué se congelaría.', 'ok');
+    } else {
+      setSessBar(list.length + ' candidato(s), ninguno claro: sólo tienen ventana propia, que lo cumple casi cualquier programa. Elige uno o escribe el nombre.', 'warn');
+    }
+  }
+
+  function initSesion() {
+    $('btnSessDetect').addEventListener('click', sessDetect);
+    $('btnSessPreview').addEventListener('click', () => sessPreview(false));
+    $('btnSessStart').addEventListener('click', sessStart);
+    $('btnSessStop').addEventListener('click', sessStop);
+    $('sessGame').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sessPreview(false); } });
+    // Estado primero: si ya hay sesión viva (el usuario volvió a esta vista) se pinta tal cual; si
+    // no la hay, renderSessStatus dispara la previsualización de arranque.
+    AXE.call('session.status', {}).then(renderSessStatus).catch((e) => setSessBar('No pude leer el estado de la sesión: ' + e.message, 'err'));
+  }
+
+  // quiet = refresco de fondo (tras guardar un nivel o al cerrarse la sesión): no pisa la barra.
+  function sessPreview(quiet) {
+    const game = $('sessGame').value.trim();
+    const b = $('btnSessPreview'); b.disabled = true; b.classList.add('busy');
+    if (!quiet) setSessBar('leyendo procesos y calculando el reparto… (no se toca nada)');
+    AXE.call('session.preview', { game: game }).then((p) => renderSessPreview(p, game, quiet))
+      .catch((e) => setSessBar('No pude previsualizar: ' + e.message, 'err'))
+      .finally(() => { b.disabled = false; b.classList.remove('busy'); });
+  }
+
+  function renderSessPreview(p, game, quiet) {
+    if (!p) return;
+    const c = p.counts || { congelado: 0, degradado: 0, intacto: 0, apps: 0 };
+    if (!sessActive) { $('sessNFrozen').textContent = c.congelado; $('sessNDeg').textContent = c.degradado; $('sessNInt').textContent = c.intacto; }
+    const fz = $('sessFreeze');
+    fz.textContent = p.freezeOk ? 'soportado · sondeado en este Windows' : (p.freezeReason || 'no soportado aquí');
+    fz.className = 'mono ' + (p.freezeOk ? 'ok' : 'err');
+    renderSessApps(p.apps || []);
+    // ON exige las dos cosas: que el kernel soporte freeze y que el juego esté corriendo. Sin
+    // alguna de ellas el motor abortaría sin tocar nada, así que ni se ofrece.
+    const bs = $('btnSessStart');
+    bs.disabled = sessActive || !(p.freezeOk && p.gameFound);
+    bs.querySelector('span').textContent = !p.freezeOk ? 'freeze no disponible aquí'
+      : (sessActive ? 'ya hay una sesión activa' : (p.gameFound ? 'congelar el fondo' : 'el juego no está abierto'));
+    if (sessActive || quiet) return;
+    if (!game) setSessBar(c.apps + ' apps en tu sesión · ' + c.congelado + ' se congelarían y ' + c.degradado + ' se degradarían. Escribe el proceso del juego para poder arrancar.');
+    else if (!p.gameFound) setSessBar('«' + game + '» no está corriendo. Ábrelo y vuelve a previsualizar.', 'warn');
+    else setSessBar('listo · ' + c.congelado + ' a congelar, ' + c.degradado + ' a degradar, ' + c.intacto + ' intactos (pid del juego: ' + p.gamePid + ')', 'ok');
+  }
+
+  function renderSessApps(apps) {
+    const host = $('sessApps'); host.textContent = '';
+    if (!apps.length) { host.appendChild(elt('div', 'mini', 'sin procesos que repartir en esta sesión.')); return; }
+    // Una app puede salir en dos filas (el juego o AXE comparten nombre con otro proceso: la fila
+    // dura va a intacto y la ajena a congelar). El nivel se guarda POR NOMBRE, así que cambiar una
+    // mueve las dos: se avisa en la fila en vez de dejar que sorprenda.
+    const seen = {};
+    apps.forEach((a) => { seen[a.name] = (seen[a.name] || 0) + 1; });
+    apps.forEach((a) => {
+      const meta = S_META[a.level] || { cls: '', label: a.level };
+      const row = elt('div', 'sapp ' + meta.cls);
+      const nm = elt('div', 'sapp-name');
+      nm.appendChild(elt('b', null, a.name));
+      if (a.count > 1) nm.appendChild(elt('span', 'sapp-n', '×' + a.count));
+      if (a.family) nm.appendChild(elt('span', 'badge', a.family));
+      if (a.override) nm.appendChild(elt('span', 'badge reboot', 'tu ajuste'));
+      if (seen[a.name] > 1) {
+        const s = elt('span', 'badge', 'en 2 niveles');
+        s.title = 'Hay procesos con este nombre en otro nivel (uno de ellos es el juego o AXE, que no se tocan). El nivel se guarda por nombre.';
+        nm.appendChild(s);
+      }
+      row.appendChild(nm);
+      if (a.hard) {
+        // Duros: el planificador los deja intactos ganando a la config, así que un selector aquí
+        // sería un control que no hace nada. Se dice por qué en vez de ofrecerlo.
+        row.appendChild(elt('span', 'sapp-hard', 'AXE nunca lo toca'));
+      } else {
+        const sel = document.createElement('select');
+        sel.className = 'slevel';
+        sel.setAttribute('aria-label', 'nivel para ' + a.name);
+        S_LEVELS.forEach((l) => {
+          const o = document.createElement('option');
+          o.value = l; o.textContent = S_META[l].label; if (l === a.level) o.selected = true;
+          sel.appendChild(o);
+        });
+        if (a.override) { const o = document.createElement('option'); o.value = 'default'; o.textContent = 'por defecto'; sel.appendChild(o); }
+        sel.addEventListener('change', () => setSessLevel(a.name, sel.value));
+        row.appendChild(sel);
+      }
+      host.appendChild(row);
+    });
+  }
+
+  function setSessLevel(name, level) {
+    AXE.call('session.setLevel', { name: name, level: level }).then((r) => {
+      setSessBar('«' + r.name + '» → ' + (r.level === 'default' ? 'nivel por defecto' : r.level) +
+        (r.needsRestart ? ' · guardado, entra en la próxima sesión (no re-reparte la activa)' : ' · guardado'), 'ok');
+      sessPreview(true);
+    }).catch((e) => { setSessBar('No pude guardar el nivel: ' + e.message, 'err'); sessPreview(true); });
+  }
+
+  function sessStart() {
+    const game = $('sessGame').value.trim();
+    if (!game) { setSessBar('Escribe el nombre del proceso del juego (ej: cs2).', 'warn'); $('sessGame').focus(); return; }
+    const b = $('btnSessStart'); b.disabled = true; b.classList.add('busy');
+    setSessBar('creando el job y congelando el fondo…');
+    AXE.call('session.start', { game: game }).then((st) => {
+      renderSessStatus(st);
+      setSessBar('sesión activa · ' + st.frozen + ' congelados' +
+        (st.failed ? ' · ' + st.failed + ' no se pudieron asignar (procesos elevados: relanza AXE como admin)' : '') +
+        ' · el fondo vuelve solo al cerrar el juego', st.failed ? 'warn' : 'ok');
+    }).catch((e) => { setSessBar('No pude iniciar la sesión: ' + e.message, 'err'); sessPreview(true); })
+      .finally(() => { b.classList.remove('busy'); });
+  }
+
+  // Solo afirma "descongelado" si el motor lo confirmó (thawOk); si no, avisa en vez de prometerlo.
+  function sessClosedBar(st, prefix) {
+    if (st && st.thawOk === false) setSessBar(prefix + ' ATENCIÓN: no pude confirmar que el fondo se descongelara. Cierra AXE (el vigía lo descongela) o reinicia las apps que sigan congeladas.', 'err');
+    else if (st && st.thawOk === true) setSessBar(prefix + ' fondo descongelado y prioridades restauradas.', 'ok');
+    else setSessBar(prefix.replace(/:$/, '.'), 'ok');
+  }
+
+  function sessStop() {
+    const b = $('btnSessStop'); b.disabled = true;
+    AXE.call('session.stop', {}).then((st) => { renderSessStatus(st); sessClosedBar(st, 'sesión cerrada:'); })
+      .catch((e) => setSessBar('No pude cerrar la sesión: ' + e.message, 'err'))
+      .finally(() => { b.disabled = false; });
+  }
+
+  function renderSessStatus(st) {
+    if (!st) return;
+    const was = sessActive;
+    sessActive = !!st.active;
+    $('sessOut').textContent = (st.lines || []).join('\n');
+    const stateEl = $('sessState');
+    stateEl.textContent = st.active ? ('ON · ' + st.game + ' (pid ' + st.gamePid + ')') : 'OFF';
+    stateEl.className = 'mono ' + (st.active ? 'ok' : '');
+    $('btnSessStop').hidden = !st.active;
+    $('sessElapsedRow').hidden = !st.active;
+    if (st.active) {
+      $('btnSessStart').disabled = true;
+      $('btnSessStart').querySelector('span').textContent = 'ya hay una sesión activa';
+      $('sessElapsed').textContent = (st.startedAt || '—') + ' · ' + fmtDur(st.elapsedS);
+      $('sessNFrozen').textContent = st.frozen; $('sessNDeg').textContent = st.degraded; $('sessNInt').textContent = st.intact;
+      if (!$('sessGame').value.trim() && st.game) $('sessGame').value = st.game;
+      startSessPoll();
+      return;
+    }
+    stopSessPoll();
+    // Salida automática: el motivo lo pone el motor (el juego se cerró / OFF manual), no se inventa.
+    if (was && st.endedReason) sessClosedBar(st, 'sesión cerrada: ' + st.endedReason);
+    sessPreview(!!was);
+  }
+
+  function startSessPoll() {
+    if (sessPoll) return;
+    // Corre aunque el usuario navegue a otra vista: que el fondo vuelva al cerrar el juego no puede
+    // depender de que estés mirando esta pantalla, sólo de que la ventana siga abierta.
+    sessPoll = setInterval(() => { AXE.call('session.status', {}).then(renderSessStatus).catch(() => {}); }, 2000);
+  }
+  function stopSessPoll() { if (sessPoll) { clearInterval(sessPoll); sessPoll = null; } }
+
+  // Ajustes: información local + privacidad. Sin lógica de red, sin auto-update (es otro spec).
+  function initAjustes() {
+    AXE.call('app.info', {}).then((info) => {
+      if (!info) return;
+      if (info.version) $('ajVer').textContent = 'v' + info.version;
+      if (info.tweaks != null) $('ajTweaks').textContent = info.tweaks + ' tweaks';
+    }).catch(() => { $('ajVer').textContent = '?'; });
+  }
+
+  // ---------- telemetria PS->JS: uptime + feeds en vivo reales (Fase 5) ----------
+  AXE.on('telemetry', (d) => {
+    if (!d) return;
+    if (d.uptimeS != null) {
+      const s = d.uptimeS, h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      $('uptime').textContent = 'encendido hace ' + (h > 0 ? h + ' h ' : '') + m + ' min';
+    }
+    const hasLive = (d.cpu != null || d.ram != null || d.jitterUs != null);
+    if (hasLive && !liveStarted) {
+      liveStarted = true;
+      document.querySelectorAll('.vital.resting').forEach((v) => v.classList.remove('resting'));
+      document.querySelectorAll('[data-vital="cpu"] .live-tag,[data-vital="ram"] .live-tag').forEach((t) => { t.textContent = 'en vivo'; });
+      const ss = $('scopeState'); if (ss) ss.textContent = 'muestreo en vivo · ~1/s';
+    }
+    if (d.cpu != null) { pushBuf(cpuBuf, d.cpu, 60); $('cpuV').textContent = Math.round(d.cpu) + ' %'; drawSpark(cpuCanvas, cpuBuf); }
+    if (d.ram != null) { pushBuf(ramBuf, d.ram, 60); $('ramV').textContent = Math.round(d.ram) + ' %'; drawSpark(ramCanvas, ramBuf); }
+    if (d.jitterMeanUs != null) lastMeanUs = d.jitterMeanUs;
+    if (d.jitterUs != null) {
+      pushBuf(scopeBuf, d.jitterUs, 160);
+      scopeMax = Math.max(scopeMax * 0.98, d.jitterUs);
+      drawScope();
+      const sorted = scopeBuf.slice().sort((a, b) => a - b);
+      const p99 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))];
+      const nowEl = $('sNow'); nowEl.textContent = Math.round(d.jitterUs) + ' µs'; nowEl.style.color = d.jitterUs > THR ? '#D9605A' : '#E6EAF0';
+      $('sP99').textContent = Math.round(p99) + ' µs';
+      $('sMax').textContent = Math.round(scopeMax) + ' µs';
+      // mismo feed alimenta el osciloscopio grande de Telemetría (sin duplicar el muestreo)
+      if (teleLoaded) {
+        drawScope($('teleScope'));
+        const tn = $('tNow'); if (tn) { tn.textContent = Math.round(d.jitterUs) + ' µs'; tn.style.color = d.jitterUs > THR ? '#D9605A' : '#E6EAF0'; }
+        if (lastMeanUs != null) { const tm = $('tMean'); if (tm) tm.textContent = Math.round(lastMeanUs) + ' µs'; }
+        const tp = $('tP99'); if (tp) tp.textContent = Math.round(p99) + ' µs';
+        const tmx = $('tMax'); if (tmx) tmx.textContent = Math.round(scopeMax) + ' µs';
+        const tst = $('teleState'); if (tst) tst.textContent = 'muestreo en vivo · ~1/s';
+      }
+    }
+  });
+})();

@@ -1,0 +1,562 @@
+/* AXE WebUI — Panel (Fase 4). Instrumento, no juguete. Tema oscuro deliberado (unico). */
+:root{
+  --bg:#0E1013; --surface:#16191F; --surface-2:#1E232B; --surface-3:#242a34;
+  --line:#2A303B; --line-2:#333b47;
+  /* AXE-018: texto secundario >= 4.5:1 (WCAG AA) sobre bg y las tres superficies: muted >= 5.6, faint >= 4.78. */
+  --fg:#E6EAF0; --muted:#98A2B3; --faint:#8B95A7;
+  --accent:#E0A32E; --accent-2:#c9962f; --accent-dim:rgba(224,163,46,.12);
+  --green:#5FAF8D; --amber:#E0A32E; --red:#D9605A;
+  --ui:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,"Cascadia Code","Consolas","SF Mono",monospace;
+  --r:14px; --r-sm:10px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--fg);font-family:var(--ui);
+  font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden;
+}
+.app{display:grid;grid-template-columns:236px 1fr;height:100vh}
+
+/* ---------- rail ---------- */
+.rail{background:linear-gradient(180deg,#12151b,#0f1217);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:20px 14px;gap:4px}
+.brand{padding:6px 8px 2px}
+.brandmark{width:104px;height:auto;display:block}
+.brandmark path[fill="#FEFEFD"],.brandmark path[fill="#FEFEFE"]{fill:var(--accent)}
+.brandmark path[fill="#020202"]{fill:#11141a}
+.ver{padding:8px 8px 14px;color:var(--faint);font-family:var(--mono);font-size:10.5px;letter-spacing:.3px}
+
+.nav-label{color:var(--faint);font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;
+  padding:14px 10px 6px;font-weight:600}
+.nav-item{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);
+  color:var(--muted);cursor:pointer;transition:background .18s ease,color .18s ease;
+  font-weight:500;position:relative;user-select:none}
+.nav-item svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7}
+.nav-item:hover{background:var(--surface);color:var(--fg)}
+.nav-item.on{background:var(--accent-dim);color:var(--fg)}
+.nav-item.on::before{content:"";position:absolute;left:-14px;top:9px;bottom:9px;width:3px;
+  border-radius:0 3px 3px 0;background:var(--accent)}
+.nav-item .kbd{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)}
+.rail-foot{margin-top:auto;padding:12px 10px 2px;border-top:1px solid var(--line);color:var(--faint);
+  font-family:var(--mono);font-size:10.5px;line-height:1.65}
+.rail-foot b{color:var(--green);font-weight:600}
+.rail-foot b.neutral{color:var(--muted)}
+
+/* ---------- stage ---------- */
+.stage{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.topbar{display:flex;align-items:center;gap:14px;padding:14px 24px;border-bottom:1px solid var(--line);
+  background:rgba(14,16,19,.7);backdrop-filter:blur(6px)}
+.eco{display:flex;gap:7px;flex-wrap:wrap}
+.chip{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--surface);
+  border:1px solid var(--line);padding:3px 9px;border-radius:999px;white-space:nowrap}
+.chip b{color:var(--fg);font-weight:600}
+.chip.pending{opacity:.55}
+.chip.on b{color:var(--green)}
+.chip.off b{color:var(--red)}
+.pill{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:12px;color:var(--green);
+  background:rgba(95,175,141,.1);border:1px solid rgba(95,175,141,.28);padding:5px 11px;border-radius:999px;white-space:nowrap}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);
+  animation:breathe 2.6s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.35}}
+
+.panel{padding:20px 24px 26px;overflow:auto;display:grid;gap:16px;
+  grid-template-columns:1fr 1fr 1fr 1fr;align-content:start}
+.panel::-webkit-scrollbar{width:10px}
+.panel::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:3px solid var(--bg)}
+
+/* panel header */
+.phead{grid-column:span 4;display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:2px}
+.phead h1{margin:0;font-size:22px;font-weight:650;letter-spacing:-.4px}
+.phead .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+.phead .clock{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right}
+.phead .clock b{color:var(--fg);font-size:15px;display:block;font-variant-numeric:tabular-nums}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025), 0 10px 30px -22px rgba(0,0,0,.7);
+  transition:border-color .2s ease,transform .2s cubic-bezier(.2,.7,.3,1),box-shadow .2s ease}
+.card:hover{border-color:var(--line-2);transform:translateY(-1px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 16px 40px -24px rgba(0,0,0,.8)}
+.card h3{margin:0 0 2px;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:600}
+
+/* score */
+/* min-height en TODAS las anchuras, no solo <1180 (ver ese corte): con span 2 y '.gauge{flex:1}' el
+   marcador declara ~38px intrinsecos, las dos filas se quedan en el alto de las constantes y
+   overflow:hidden recortaba las barras del score y la ultima medicion. Visto en capturas reales
+   a 1184, 1366 y 1280@150%: la mitad inferior del marcador no se pintaba nunca. */
+.score{grid-column:span 2;grid-row:span 2;display:flex;flex-direction:column;min-height:390px;
+  background:radial-gradient(120% 120% at 30% 0%,#191d24,#14171c)}
+.score-top{display:flex;justify-content:space-between;align-items:flex-start}
+.receipt{font-family:var(--mono);font-size:11px;color:var(--accent);cursor:pointer;
+  display:inline-flex;gap:5px;align-items:center;opacity:.9;background:none;border:0;padding:0}
+.receipt:hover{opacity:1;text-decoration:underline}
+.receipt[disabled]{opacity:.35;cursor:default;text-decoration:none}
+.gauge{flex:1;display:flex;align-items:center;justify-content:center;gap:26px;padding:6px 0}
+.gauge-read{display:flex;flex-direction:column;gap:15px}
+.gauge-read .big{font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.5}
+.delta{display:flex;flex-direction:column;gap:2px}
+.delta .n{font-family:var(--mono);font-size:22px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.delta .n.up{color:var(--green)}
+.delta .l{font-size:11px;color:var(--muted);line-height:1.35}
+.gauge-center{position:absolute;text-align:center;pointer-events:none}
+.gauge-wrap{position:relative;display:grid;place-items:center}
+.gauge-val{font-family:var(--mono);font-size:52px;font-weight:700;letter-spacing:-2px;line-height:1;font-variant-numeric:tabular-nums}
+.gauge-unit{font-size:11px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-top:4px}
+.verdict{display:inline-flex;align-items:center;gap:6px;margin-top:9px;font-size:11px;font-family:var(--mono);
+  color:var(--green);background:rgba(95,175,141,.1);border:1px solid rgba(95,175,141,.28);
+  padding:3px 9px;border-radius:999px}
+.verdict.measuring{color:var(--muted);background:var(--surface-2);border-color:var(--line)}
+.verdict.na{color:var(--muted);background:var(--surface-2);border-color:var(--line)}
+
+/* vitals */
+.vital{display:flex;flex-direction:column;gap:8px;min-height:120px}
+.vital .row{display:flex;justify-content:space-between;align-items:baseline}
+.vital .v{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.vital canvas{width:100%;height:38px;display:block}
+.vital .sub{font-size:11px;color:var(--faint);font-family:var(--mono)}
+.vital.resting .v{color:var(--faint)}
+.vital .live-tag{font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-family:var(--mono)}
+
+/* oscilloscope */
+.scope{grid-column:span 4}
+.scope-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.scope-stats{display:flex;gap:22px}
+.scope-stats div{font-family:var(--mono)}
+.scope-stats span{color:var(--muted);font-size:11px}
+.scope-stats b{font-size:16px;font-weight:600;display:block;font-variant-numeric:tabular-nums}
+.scope canvas{width:100%;height:130px;display:block;border-radius:8px;background:#101318;border:1px solid var(--line)}
+.legend{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px;display:flex;gap:16px}
+.legend i{width:16px;height:2px;display:inline-block;vertical-align:middle;margin-right:5px}
+
+/* status + actions */
+.status{grid-column:span 2;display:flex;flex-direction:column;gap:13px}
+.tier-row{display:flex;gap:9px}
+.tier{flex:1;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:12px 13px;position:relative;overflow:hidden}
+.tier::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.tier.t0::before{background:var(--green)}
+.tier.t1::before{background:var(--amber)}
+.tier.t2::before{background:var(--red)}
+.tier .k{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+.tier .n{font-family:var(--mono);font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.tier .n small{font-size:12px;color:var(--faint);font-weight:400}
+
+.actions{grid-column:span 2;display:grid;grid-template-columns:1fr 1fr;gap:11px;align-content:start}
+.btn{border:1px solid var(--line);background:var(--surface-2);color:var(--fg);border-radius:var(--r-sm);
+  padding:15px 14px;display:flex;flex-direction:column;gap:3px;cursor:pointer;text-align:left;
+  transition:transform .16s cubic-bezier(.2,.7,.3,1),border-color .16s,background .16s;font-family:inherit}
+.btn:hover{transform:translateY(-2px);border-color:var(--line-2);background:var(--surface-3)}
+.btn:active{transform:translateY(0)}
+.btn b{font-size:14px;font-weight:600}
+.btn span{font-size:11px;color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0E1013}
+.btn.primary span{color:rgba(14,16,19,.7)}
+.btn.primary:hover{background:#eab13f;box-shadow:0 8px 24px -8px rgba(224,163,46,.55)}
+.btn.wide{grid-column:span 2}
+.btn.danger{border-color:rgba(217,96,90,.3);color:var(--red)}
+/* .6 y no .42: el subtitulo de un boton desactivado suele ser el POR QUE ("escribe el proceso...",
+   "captura el antes primero") y a .42 no se leia en las capturas reales. */
+.btn[disabled]{opacity:.6;cursor:not-allowed;transform:none;background:var(--surface-2);border-color:var(--line)}
+/* primary desactivado: el fondo pasa a oscuro pero heredaba el texto OSCURO del ambar = invisible
+   (visto en el ON de Sesion y en "Medir despues" de Prueba). */
+.btn.primary[disabled]{color:var(--fg)}
+.btn.primary[disabled] span{color:var(--muted)}
+.btn[disabled]:hover{transform:none;background:var(--surface-2);border-color:var(--line);box-shadow:none}
+.btn.primary.busy{opacity:.8;cursor:progress}
+
+/* entrance */
+.fade-in{opacity:0;transform:translateY(8px);animation:rise .6s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes rise{to{opacity:1;transform:none}}
+.d0{animation-delay:0s}.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}
+.d4{animation-delay:.2s}.d5{animation-delay:.25s}.d6{animation-delay:.3s}
+
+/* receipt modal (la 'receta' honesta: el breakdown real del score) */
+.sheet{position:fixed;inset:0;background:rgba(8,9,11,.66);backdrop-filter:blur(3px);
+  display:none;align-items:center;justify-content:center;z-index:20;padding:24px}
+.sheet.open{display:flex}
+.sheet-card{background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r);
+  max-width:560px;width:100%;padding:22px;box-shadow:0 30px 80px -30px rgba(0,0,0,.7)}
+.sheet-card h2{margin:0 0 4px;font-size:16px;font-weight:650}
+.sheet-card .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+.sheet-card pre{font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--fg);
+  background:#101318;border:1px solid var(--line);border-radius:var(--r-sm);padding:14px;
+  margin:0;white-space:pre-wrap;max-height:48vh;overflow:auto}
+.sheet-close{margin-top:14px;display:flex;justify-content:flex-end}
+.sheet-close button{background:var(--surface-2);border:1px solid var(--line);color:var(--fg);
+  border-radius:var(--r-sm);padding:8px 16px;cursor:pointer;font-family:inherit;font-size:13px}
+.sheet-close button:hover{background:var(--surface-3);border-color:var(--line-2)}
+
+/* score: hero glow detras del gauge + barras de componentes reales */
+.score{position:relative;overflow:hidden}
+.score::before{content:"";position:absolute;top:-40%;left:8%;width:60%;height:80%;pointer-events:none;
+  background:radial-gradient(closest-side,rgba(224,163,46,.10),transparent 72%);filter:blur(6px)}
+.score>*{position:relative}
+.score-bars{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px;padding-top:6px;margin-top:2px;
+  border-top:1px solid var(--line)}
+.sbar{display:flex;align-items:center;gap:10px}
+.sbar-l{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);width:64px;flex:none}
+.sbar-track{flex:1;height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.sbar-track i{display:block;height:100%;width:0;border-radius:3px;
+  background:linear-gradient(90deg,var(--accent-2),var(--accent));
+  transition:width .9s cubic-bezier(.2,.7,.3,1)}
+.sbar-track.na i{background:var(--line-2)}
+.sbar-v{font-family:var(--mono);font-size:11px;color:var(--fg);width:46px;text-align:right;flex:none;
+  font-variant-numeric:tabular-nums}
+.sbar-v.na{color:var(--faint)}
+
+/* reposo mas elegante: valor tenue + micro-latido del baseline (no "roto") */
+.vital.resting .live-tag{position:relative}
+.vital.resting canvas{opacity:.7}
+
+/* accesibilidad: foco de teclado visible y consistente */
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.nav-item:focus-visible,.btn:focus-visible,.receipt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ===== router: ocultar vistas inactivas (la clase .panel pone display:grid y ganaria al UA [hidden]) ===== */
+.view[hidden]{display:none !important}
+
+/* ===== Optimizar ===== */
+.opt{padding:20px 24px 28px;overflow:auto;display:flex;flex-direction:column;gap:18px}
+.opt::-webkit-scrollbar{width:10px}
+.opt::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:3px solid var(--bg)}
+.ohead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.ohead h1{margin:0;font-size:22px;font-weight:650;letter-spacing:-.4px}
+.ohead .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+.obar{font-family:var(--mono);font-size:12px;color:var(--muted);background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 14px;min-height:38px;display:flex;align-items:center;gap:12px}
+.obar.err{color:var(--red);border-color:rgba(217,96,90,.4)}
+.obar.ok{color:var(--green);border-color:rgba(95,175,141,.35)}
+.obar b{color:var(--fg);font-weight:600}
+
+.olist{display:flex;flex-direction:column;gap:22px}
+.tgroup{display:flex;flex-direction:column;gap:11px}
+.tgroup-h{display:flex;align-items:center;gap:10px;padding-bottom:2px}
+.tgroup-h .dot{width:9px;height:9px;border-radius:2px;flex:none}
+.tgroup-h.t0 .dot{background:var(--green)}.tgroup-h.t1 .dot{background:var(--amber)}.tgroup-h.t2 .dot{background:var(--red)}
+.tgroup-h h2{margin:0;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--fg);font-weight:650}
+.tgroup-h .count{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+
+.tw{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 15px 13px 18px;
+  position:relative;overflow:hidden;display:flex;flex-direction:column;gap:9px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.02);transition:border-color .18s ease}
+.tw::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.tw.t0::before{background:var(--green)}.tw.t1::before{background:var(--amber)}.tw.t2::before{background:var(--red)}
+.tw:hover{border-color:var(--line-2)}
+.tw.blocked{opacity:.55}
+.tw.on{background:linear-gradient(180deg,rgba(95,175,141,.05),transparent 60%),var(--surface)}
+.tw-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.tw-name{font-weight:600;font-size:13.5px;line-height:1.3}
+.tw-state{flex:none;font-family:var(--mono);font-size:10px;letter-spacing:.4px;text-transform:uppercase;
+  padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tw-state.on{color:var(--green);border-color:rgba(95,175,141,.35);background:rgba(95,175,141,.08)}
+.tw-state.blocked{color:var(--faint)}
+.tw-desc{color:var(--muted);font-size:12px;line-height:1.5;flex:1}
+.tw-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:1px}
+.tw-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.badge{font-family:var(--mono);font-size:9.5px;letter-spacing:.3px;text-transform:uppercase;color:var(--faint);
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.badge.src{color:var(--muted);text-decoration:none}
+.badge.src:hover{color:var(--accent);border-color:var(--accent)}
+.badge.warn{color:var(--red);border-color:rgba(217,96,90,.3)}
+.badge.reboot{color:var(--amber);border-color:rgba(224,163,46,.3)}
+.tw-act{flex:none;font-family:inherit;font-size:12px;font-weight:600;padding:6px 13px;border-radius:var(--r-sm);
+  cursor:pointer;border:1px solid var(--accent);background:transparent;color:var(--accent);transition:background .15s,color .15s}
+.tw-act:hover{background:var(--accent);color:#0E1013}
+.tw-act.revert{border-color:var(--line-2);color:var(--muted)}
+.tw-act.revert:hover{background:var(--surface-3);color:var(--fg)}
+.tw-act[disabled]{opacity:.5;cursor:progress}
+.tw-blocked-why{font-size:11px;color:var(--faint);font-style:italic}
+
+.confirm-yes{background:var(--accent) !important;border-color:var(--accent) !important;color:#0E1013 !important;font-weight:600}
+.confirm-yes.danger{background:var(--red) !important;border-color:var(--red) !important;color:#fff !important}
+
+@media (prefers-reduced-motion:reduce){
+  .fade-in{animation:none;opacity:1;transform:none}
+  .pill .dot{animation:none}
+  .card:hover{transform:none}
+  .sbar-track i{transition:none}
+  .btn.busy{transition:none}
+}
+
+/* ===== Fase 7: pantallas (Telemetría · Prueba · Seguridad · Ajustes) ===== */
+/* mismo esqueleto que Optimizar: columna con scroll propio, se apoya en .ohead/.obar/.card */
+.scr{padding:20px 24px 28px;overflow:auto;display:flex;flex-direction:column;gap:16px}
+.scr::-webkit-scrollbar{width:10px}
+.scr::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:3px solid var(--bg)}
+.scr h1{margin:0;font-size:22px;font-weight:650;letter-spacing:-.4px}
+.mini{color:var(--muted);font-size:12px;line-height:1.5;margin:2px 0 12px}
+.mini-inline{color:var(--faint);font-family:var(--mono);font-size:10.5px;font-weight:400;letter-spacing:.3px;text-transform:none}
+.btn.busy{opacity:.8;cursor:progress}
+
+/* salida monoespaciada del motor: MISMAS lineas que la CLI (la honestidad vive en el texto del motor) */
+.mono-out{font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--fg);white-space:pre-wrap;
+  word-break:break-word;background:#101318;border:1px solid var(--line);border-radius:8px;
+  padding:14px 16px;margin:12px 0 0;overflow-x:auto;max-height:360px;overflow-y:auto}
+.mono-out.sm{font-size:11px;max-height:120px;margin:10px 0 0}
+
+/* Hallazgos del monitor de red. La severidad se pinta con la barra lateral y NO solo con el
+   color del texto: quien no distingue rojo de ambar sigue viendo tres estados distintos. */
+.netfind{font-size:12.5px;line-height:1.55;color:var(--muted);margin:10px 0 0;
+  padding:9px 12px;border-radius:8px;border:1px solid var(--line);border-left-width:3px}
+.netfind.ok{border-left-color:var(--green)}
+.netfind.warn{border-left-color:var(--amber);color:var(--fg)}
+.netfind.bad{border-left-color:var(--red);color:var(--fg)}
+
+/* Telemetria: osciloscopio grande (reusa el feed real de jitter, no duplica muestreo) */
+.scr-live canvas{width:100%;height:210px;display:block;border-radius:8px;background:#101318;border:1px solid var(--line)}
+#teleScope{margin-top:2px}
+
+/* Prueba: A/B antes -> despues */
+.ab{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.ab-col{display:flex;flex-direction:column;gap:12px}
+.ab-h{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:600}
+.ab-tag{margin-left:auto;font-family:var(--mono);font-size:9.5px;letter-spacing:.4px;text-transform:none;
+  color:var(--faint);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+.ab-tag.ok{color:var(--green);border-color:rgba(95,175,141,.35);background:rgba(95,175,141,.08)}
+.ab-score{display:flex;align-items:baseline;gap:6px}
+.ab-score b{font-family:var(--mono);font-size:40px;font-weight:700;letter-spacing:-2px;line-height:1;font-variant-numeric:tabular-nums}
+.ab-score span{color:var(--faint);font-family:var(--mono);font-size:13px}
+.ab-rows{display:flex;flex-direction:column;gap:6px}
+.ab-rows div{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px}
+.ab-rows span{color:var(--muted)}
+.ab-rows b{font-weight:600;font-variant-numeric:tabular-nums}
+
+/* Prueba: captura FPS (PresentMon) */
+.fps-row{display:flex;gap:10px;align-items:stretch;margin-top:12px;flex-wrap:wrap}
+.in{font-family:var(--mono);font-size:12.5px;color:var(--fg);background:#101318;border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:9px 12px;flex:1;min-width:180px;outline:none}
+.in:focus{border-color:var(--accent)}
+.in.sm{flex:none;width:78px;min-width:0;text-align:center}
+.fps-row .btn{flex:none;min-width:150px}
+
+/* Prueba: diagnostico de configuracion */
+.diag-list{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.finding{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;
+  position:relative;overflow:hidden}
+.finding::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line-2)}
+.finding.bad::before{background:var(--red)}.finding.ok::before{background:var(--green)}.finding.unk::before{background:var(--muted)}
+.finding-top{display:flex;align-items:center;gap:9px}
+.finding-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--muted)}
+.finding.bad .finding-dot{background:var(--red)}.finding.ok .finding-dot{background:var(--green)}
+.finding-title{font-weight:600;font-size:13px;flex:1}
+.finding-badge{flex:none;font-family:var(--mono);font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;
+  padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.finding-badge.bad{color:var(--red);border-color:rgba(217,96,90,.35);background:rgba(217,96,90,.08)}
+.finding-badge.ok{color:var(--green);border-color:rgba(95,175,141,.35);background:rgba(95,175,141,.08)}
+.finding-detail{color:var(--muted);font-size:12px;line-height:1.5;margin-top:7px}
+.finding-fix{font-size:12px;line-height:1.5;margin-top:6px;color:var(--fg)}
+.finding-fix b{color:var(--accent)}
+.finding-est{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:5px}
+
+/* Seguridad */
+.seg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.seg-state{display:flex;align-items:center;gap:9px;margin-top:12px;font-family:var(--mono);font-size:13px;font-weight:600}
+.seg-state .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+.seg-state .dot.ok{background:var(--green)}.seg-state .dot.warn{background:var(--amber)}.seg-state .dot.err{background:var(--red)}
+.seg-grid .btn{width:100%;margin-top:12px}
+.seg-list{margin:12px 0 0;padding-left:18px;color:var(--muted);font-size:12px;line-height:1.7}
+.seg-list b{color:var(--fg);font-weight:600}
+
+/* Ajustes: filas clave-valor */
+.kv{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:9px 0;border-top:1px solid var(--line)}
+.kv:first-of-type{border-top:none}
+.kv span{color:var(--muted);font-size:12.5px}
+.kv b{font-weight:600;font-size:12.5px;text-align:right}
+.mono{font-family:var(--mono)}
+
+/* --- Sesion de juego (spec 2026-07-25): reparto por app + selector de nivel --- */
+.obar.warn{color:var(--amber);border-color:rgba(224,163,46,.4)}
+.mono.ok{color:var(--green)}
+.mono.err{color:var(--red)}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:8px;margin-top:14px}
+.sapp{display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative;overflow:hidden;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 12px 9px 14px}
+.sapp::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.sapp.t0::before{background:var(--green)}
+.sapp.t1::before{background:var(--amber)}
+.sapp.t2::before{background:var(--red)}
+.sapp-name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.sapp-name b{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--fg);overflow-wrap:anywhere}
+.sapp-n{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.sapp-hard{font-family:var(--mono);font-size:9.5px;letter-spacing:.3px;text-transform:uppercase;color:var(--faint);white-space:nowrap}
+.slevel{flex:none;font-family:var(--mono);font-size:11px;color:var(--fg);background:#101318;
+  border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 7px;cursor:pointer}
+.slevel:focus{border-color:var(--accent);outline:none}
+
+@media (max-width:900px){ .ab{grid-template-columns:1fr} .sgrid{grid-template-columns:1fr} }
+
+/* ================================================================================
+   ESCALADO: la interfaz cabe en la ventana que HAY, no en una ideal de 1200x840.
+   ================================================================================
+   La ventana ya se recorta al escritorio util (Get-AXEWindowFit, 39-webdetect), asi que en un
+   portatil escalado llega bastante mas pequena que el tamano de diseno: 1920x1080 al 125% son
+   1536x816 DIP y al 150% son 1280x680. Sin estos cortes el rail seguia pidiendo 236px y el panel
+   4 columnas pasara lo que pasara, y el contenido se apretaba hasta romperse.
+     Se corta por ANCHO y tambien por ALTO. El alto es el que escasea de verdad al escalar -de 1080
+   a 680 DIP hay un tercio menos- y es justo la dimension que nadie suele contemplar: un
+   osciloscopio de 210px fijos en una ventana de 640 se come el hueco de todo lo demas.
+     Los cortes son de ANCHO DE VENTANA, no de dispositivo: aqui no hay moviles. Coinciden con los
+   puntos donde una columna concreta deja de tener sitio, no con numeros redondos de catalogo. */
+
+/* -- 1180: el panel pasa de 4 columnas a 2. Por debajo de esto una tarjeta baja de ~230px util. -- */
+@media (max-width:1180px){
+  .panel{grid-template-columns:1fr 1fr}
+  .phead,.scope,.status,.actions{grid-column:span 2}
+  /* El marcador ocupaba 2x2. En una rejilla de 2 columnas eso es la parrilla entera: se le quita
+     el alto doble o empuja todo lo demas fuera de la primera pantalla. */
+  /* El min-height NO es decorativo: sin el, la fila del marcador se queda en 38px y el gauge
+     -220px de lienzo- se sale por encima de las tarjetas de abajo, solapandolas.
+       El motivo: '.gauge{flex:1}' es flex-basis:0, asi que el marcador -contenedor flex en
+     columna- declara una altura intrinseca de 38px (solo su cabecera). Con grid-row:span 2 no se
+     notaba nunca, porque la fila doble le imponia la altura; en cuanto la fila pasa a 'auto' la
+     rejilla le cree esos 38px.
+       Medido en el navegador, tres candidatos, y solo uno funciona: min-height:min-content NO
+     agranda la fila (sigue en 38 y solapa), overflow:visible TAMPOCO (misma fila de 38), y un
+     min-height DEFINIDO en px si (la fila pasa a valer eso y el solape desaparece). Solo una
+     longitud definida participa en el calculo de la pista.
+       El numero sale de sumar el contenido real, no a ojo: lienzo 220 + cabecera ~54 + barras del
+     score ~46 + relleno 36 = ~356, y se deja margen hasta 390. Verificado con las barras
+     rellenas, que es el caso alto. */
+  .score{grid-column:span 2;grid-row:auto;min-height:390px}
+}
+
+/* -- 860: el rail se queda en iconos. Devuelve 172px al contenido, que a esta anchura es una
+      columna entera. Los rotulos se van; los iconos, el orden y el nombre accesible se quedan.
+        Se colapsa AQUI y no antes por lo que se vio al mirarlo de verdad a 940px: con 704px de
+      contenido las dos columnas caben de sobra, o sea que quitar los rotulos ahi era pagar un
+      precio de usabilidad sin cobrar nada a cambio.
+        La etiqueta se oculta por '.nav-t', que existe justo para esto. Antes era un nodo de texto
+      suelto dentro de .nav-item -sin elemento propio, o sea sin selector- y al estrechar el rail
+      no habia forma de esconderla: se salia por encima del contenido. Como el texto desaparece,
+      cada .nav-item lleva aria-label y title en el HTML: en modo icono el boton sigue teniendo
+      nombre para un lector de pantalla y tooltip para todos los demas. -- */
+@media (max-width:860px){
+  .app{grid-template-columns:64px 1fr}
+  .rail{padding:14px 8px;align-items:center}
+  .brand{padding:2px}
+  .brandmark{width:38px}
+  .ver,.nav-label,.rail-foot,.nav-item .kbd,.nav-t{display:none}
+  .nav-item{justify-content:center;padding:11px 0;gap:0}
+  .nav-item svg{width:19px;height:19px}
+  .nav-item.on::before{left:-8px}
+  .topbar{padding:12px 16px}
+  .panel,.opt,.scr{padding:16px 16px 22px}
+}
+
+/* -- 760: una sola columna. Es el suelo real: la ventana no baja de 820 DIP de ancho salvo en
+      pantallas muy pequenas, donde Get-AXEWindowFit si la deja encoger mas. -- */
+@media (max-width:760px){
+  .panel{grid-template-columns:1fr}
+  .phead,.scope,.score,.status,.actions{grid-column:span 1}
+  .actions{grid-template-columns:1fr}
+  .btn.wide{grid-column:span 1}
+  /* Las barras del score se quedan en DOS columnas. Apilarlas era la idea inicial y esta medida y
+     descartada: anadian ~46px al marcador, justo lo que hacia que su contenido (406px) pasara del
+     minimo de la fila y se recortara. A esta anchura hay ~600px de contenido y una barra necesita
+     ~290, asi que dos columnas caben y el alto del marcador no se mueve. */
+  .phead{flex-wrap:wrap;gap:8px}
+  .phead .clock{text-align:left}
+  .tier-row{flex-wrap:wrap}
+  .ohead{flex-wrap:wrap}
+  /* El gauge se queda en FILA a proposito. Apilarlo aqui era la idea inicial y esta descartada:
+     el marcador depende de un min-height definido (ver el corte de 1180) y apilar dispara su alto
+     a ~500px, o sea que ese minimo dejaria de cubrirlo y el contenido se recortaria. En fila
+     necesita ~420px y aqui hay ~700 de contenido, asi que cabe de sobra y el alto sigue acotado. */
+}
+
+/* -- Alto escaso. Los lienzos y los volcados de texto son lo unico con altura fija, o sea que son
+      lo unico que hay que ceder: encogerlos mantiene legible TODO lo demas. -- */
+@media (max-height:820px){
+  .scope canvas{height:104px}
+  .scr-live canvas{height:150px}
+  .mono-out{max-height:230px}
+  .panel{gap:13px}
+}
+@media (max-height:660px){
+  .scope canvas{height:80px}
+  .scr-live canvas{height:118px}
+  .mono-out{max-height:165px}
+  .mono-out.sm{max-height:96px}
+  /* La tarjeta de constantes NO baja de sus 120px base: se probo con 96 y con 112 y en las dos la
+     fila queda por debajo del contenido (fila 38 + lienzo + subtitulo + relleno) y lo recorta,
+     porque el min-height definido manda sobre el alto real igual que en el marcador. Lo unico que
+     puede ceder aqui sin perder informacion es el lienzo del sparkline. */
+  .vital canvas{height:26px}
+  .gauge-val{font-size:40px}
+  .sheet-card pre{max-height:40vh}
+  /* Con la cifra del marcador mas pequena el contenido baja de ~356 a ~344, asi que el minimo
+     acompana. Se recorta el minimo, no el contenido: sigue por encima de lo que ocupa. */
+  .score{min-height:360px}
+}
+
+/* ===== Optimiza tu PC: un clic (spec 2026-09-24) ===== */
+.oneclick{grid-column:span 4;display:flex;flex-direction:column;gap:14px}
+/* display:flex de los hijos anula el atributo hidden (la hoja del autor gana a la del navegador). */
+.oneclick [hidden]{display:none !important}
+.oc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.oc-sub{color:var(--muted);font-size:12.5px;margin-top:4px;max-width:560px;line-height:1.45}
+.oc-go{min-width:190px;flex:none}
+.oc-profiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.oc-p{position:relative;text-align:left;display:flex;flex-direction:column;gap:3px;cursor:pointer;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 44px 11px 13px;
+  color:var(--fg);font:inherit;transition:border-color .15s ease,background .15s ease}
+.oc-p:hover{border-color:var(--line-2);background:var(--surface-3)}
+.oc-p b{font-size:13.5px;font-weight:600}
+.oc-p span{font-size:11.5px;color:var(--muted);line-height:1.35}
+.oc-p .oc-n{position:absolute;top:10px;right:12px;font-style:normal;font-family:var(--mono);font-size:15px;
+  font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.oc-p.on{border-color:var(--accent);background:var(--accent-dim)}
+.oc-p.on .oc-n{color:var(--accent)}
+.oc-p[disabled]{cursor:not-allowed;opacity:.65}
+.oc-p[disabled]:hover{border-color:var(--line);background:var(--surface-2)}
+.oc-p.on[disabled]:hover{border-color:var(--accent);background:var(--accent-dim)}
+.oc-steps{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12.5px}
+.oc-steps li{color:var(--faint);display:flex;align-items:center;gap:7px}
+.oc-steps li::before{content:"";width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor}
+.oc-steps li.done{color:var(--muted)}
+.oc-steps li.done::before{background:var(--green);border-color:var(--green)}
+.oc-steps li.now{color:var(--fg)}
+.oc-steps li.now::before{background:var(--accent);border-color:var(--accent);animation:ocPulse 1.2s ease-in-out infinite}
+@keyframes ocPulse{50%{opacity:.35}}
+.oc-msg{font-size:12.5px;line-height:1.45;padding:9px 12px;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--surface-2);color:var(--fg)}
+.oc-msg.ok{border-color:rgba(95,175,141,.45)}
+.oc-msg.warn{border-color:rgba(224,163,46,.5)}
+.oc-msg.err{border-color:rgba(217,96,90,.55)}
+.oc-result{display:flex;flex-direction:column;gap:6px}
+.oc-applied{font-size:12.5px;color:var(--fg);font-weight:600}
+.oc-fail{font-family:var(--mono);font-size:11.5px;color:var(--red)}
+.oc-warn{font-size:12px;color:var(--amber)}
+.oc-row{display:grid;grid-template-columns:minmax(120px,1fr) auto auto;gap:12px;align-items:center;font-size:12.5px;
+  padding:6px 10px;border-radius:8px;background:var(--surface-2)}
+.oc-l{color:var(--muted)}
+.oc-v{font-family:var(--mono);color:var(--fg);font-variant-numeric:tabular-nums}
+.oc-tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);cursor:help}
+.oc-tag.ok{color:var(--green);border-color:rgba(95,175,141,.45)}
+.oc-tag.bad{color:var(--red);border-color:rgba(217,96,90,.5)}
+.oc-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.oc-link{background:none;border:0;padding:0;color:var(--accent);font-family:var(--mono);font-size:11.5px;cursor:pointer}
+.oc-undo{background:var(--surface-2);border:1px solid rgba(217,96,90,.35);color:var(--red);border-radius:var(--r-sm);
+  padding:8px 14px;font:inherit;font-size:12.5px;cursor:pointer;margin-left:auto}
+.oc-undo:hover{background:var(--surface-3)}
+.oc-undo[disabled]{opacity:.6;cursor:not-allowed}
+.oc-t2{display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow:auto;margin-bottom:4px}
+.oc-t2-item{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--surface-2);cursor:pointer}
+.oc-t2-item input{margin-top:3px;accent-color:var(--accent)}
+.oc-t2-txt{display:flex;flex-direction:column;gap:2px}
+.oc-t2-txt b{font-size:12.5px;color:var(--fg);font-weight:600}
+.oc-t2-txt span{font-size:11.5px;color:var(--muted);line-height:1.4}
+@media (prefers-reduced-motion:reduce){ .oc-steps li.now::before{animation:none} }
+/* Cortes de la tarjeta DESPUES de su regla base: con la misma especificidad gana la ultima. */
+@media (max-width:1180px){ .oneclick{grid-column:span 2} }
+@media (max-width:760px){
+  .oneclick{grid-column:span 1}
+  .oc-head{flex-wrap:wrap}
+  .oc-go{width:100%}
+  .oc-profiles{grid-template-columns:1fr}
+}
+/* Texto accesible para lectores de pantalla sin alterar la composicion visual. */
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
