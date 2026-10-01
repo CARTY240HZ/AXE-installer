@@ -44,7 +44,7 @@ Revierte los tweaks desde la app (**Revertir todo**) antes de desinstalar. Despu
 
 ## Por qué confiar en esto
 
-- **Auditable:** el motor es PowerShell abierto. `dist/AXE.ps1` es la concatenación de 31 módulos; fuente, tests y CI viven en el repositorio de desarrollo.
+- **Revisable:** el motor es PowerShell en texto plano. `dist/AXE.ps1` es la concatenación de 31 módulos y puedes leerlo entero antes de ejecutarlo. El repositorio de desarrollo (fuente por módulos, tests y CI) es privado.
 - **Verificable:** cada release publica `SHA256SUMS` y `sbom.json` (CycloneDX) con los componentes de terceros.
 - **Honesto:** la mayoría de tweaks mueven el FPS dentro del ruido de medición, también en las herramientas de pago. AXE lo dice y marca los probables placebo.
 
