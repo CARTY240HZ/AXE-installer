@@ -3,9 +3,13 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y [Versionado Semántico](https://semver.org/lang/es/).
 
-## [Sin publicar] — Endurecimiento tras la auditoría técnica integral 2026-09-29
+## [1.1.2] — 2026-10-01 — Endurecimiento tras la auditoría técnica integral 2026-09-29
 
 Corrige los hallazgos AXE-001 a AXE-023 de `AUDITORIA-TECNICA-INTEGRAL-2026-09-29.md` que se podían cerrar en código.
+
+### Instalación
+- Instalador: además del acceso del menú Inicio, crea un acceso directo `AXE` en el Escritorio del usuario.
+- `Get-AXE.ps1`: instalación con un comando que descarga la release, verifica el SHA256 y aborta si no coincide.
 
 ### Revisión posterior
 - Instalador: con `-AllowUnsigned` ahora también verifica `SHA256SUMS` (si existe) y desbloquea (`Unblock-File`) lo instalado; antes un release sin firmar
@@ -251,6 +255,7 @@ Correcciones de la revisión automática del PR #15.
 - **Build modular**: el motor se parte en módulos numerados en `src/`; `build.ps1` los concatena
   a `dist/AXE.ps1` (fuente única). Reversión con **fidelidad de snapshot** (no inventa defaults).
 
+[1.1.2]: https://github.com/CARTY240HZ/AXE-installer/releases/tag/v1.1.2
 [1.1.1]: https://github.com/CARTY240HZ/AXE/releases/tag/v1.1.1
 [1.1.0]: https://github.com/CARTY240HZ/AXE/releases/tag/v1.1.0
 [1.0.0]: https://github.com/CARTY240HZ/AXE/releases/tag/v1.0.0

@@ -1,15 +1,15 @@
-<p align="center"><img src="logo/axe.svg" alt="AXE" width="96" height="96"></p>
+﻿<p align="center"><img src="logo/axe.svg" alt="AXE" width="96" height="96"></p>
 
 <h1 align="center">AXE</h1>
-<p align="center"><b>Optimizador de Windows para juegos. Mide el efecto real, revierte con fidelidad y dice cuándo un tweak es placebo.</b></p>
+<p align="center"><b>Optimizador de Windows para juegos. Mide el efecto real, revierte con fidelidad y dice cuÃ¡ndo un tweak es placebo.</b></p>
 
 ---
 
 ## Instalar (1 minuto)
 
-**Requisitos:** Windows 10/11 (64 bits) y PowerShell 5.1 (viene con Windows). Sin cuenta, sin telemetría.
+**Requisitos:** Windows 10/11 (64 bits) y PowerShell 5.1 (viene con Windows). Sin cuenta, sin telemetrÃ­a.
 
-### Opción A — un comando
+### OpciÃ³n A â€” un comando
 
 Abre PowerShell y ejecuta:
 
@@ -17,18 +17,18 @@ Abre PowerShell y ejecuta:
 irm https://raw.githubusercontent.com/CARTY240HZ/AXE-installer/main/Get-AXE.ps1 | iex
 ```
 
-Descarga la última release, **verifica el SHA256** y ejecuta el instalador. Si el hash no cuadra, aborta sin instalar.
+Descarga la Ãºltima release, **verifica el SHA256** y ejecuta el instalador. Si el hash no cuadra, aborta sin instalar.
 
-### Opción B — a mano
+### OpciÃ³n B â€” a mano
 
-1. Descarga `AXE-<versión>.zip` y `SHA256SUMS` desde [Releases](../../releases/latest).
-2. Comprueba el hash: `(Get-FileHash .\AXE-1.1.1.zip).Hash.ToLower()` debe coincidir con `SHA256SUMS`.
+1. Descarga `AXE-<versiÃ³n>.zip` y `SHA256SUMS` desde [Releases](../../releases/latest).
+2. Comprueba el hash: `(Get-FileHash .\AXE-1.1.2.zip).Hash.ToLower()` debe coincidir con `SHA256SUMS`.
 3. Extrae el ZIP y ejecuta `Install-AXE.ps1` **como administrador**.
-4. Abre **AXE** desde el menú Inicio.
+4. Abre **AXE** desde el menÃº Inicio.
 
 Instala en `Program Files\AXE` (binarios protegidos) y `ProgramData\AXE` (snapshots). No crea tareas programadas ni procesos de fondo. Las actualizaciones son manuales.
 
-> **Aviso honesto:** esta release **no está firmada** (proyecto gratuito, sin certificado de firma de código). SmartScreen avisará, así que verificar el hash es obligatorio. Si el ZIP conserva la marca de descarga, lanza `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-AXE.ps1 -AllowUnsigned`.
+> **Aviso honesto:** esta release **no estÃ¡ firmada** (proyecto gratuito, sin certificado de firma de cÃ³digo). SmartScreen avisarÃ¡, asÃ­ que verificar el hash es obligatorio. Si el ZIP conserva la marca de descarga, lanza `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-AXE.ps1 -AllowUnsigned`.
 
 ## Probar sin instalar
 
@@ -36,16 +36,16 @@ Instala en `Program Files\AXE` (binarios protegidos) y `ProgramData\AXE` (snapsh
 AXE.bat -SelfTest
 ```
 
-Valida la integridad del catálogo (82 tweaks, 112 comprobaciones) sin tocar el sistema ni pedir admin. Desde una carpeta clonada AXE **bloquea las operaciones elevadas** a propósito: solo se aplican tweaks desde la copia instalada.
+Valida la integridad del catÃ¡logo (82 tweaks, 112 comprobaciones) sin tocar el sistema ni pedir admin. Desde una carpeta clonada AXE **bloquea las operaciones elevadas** a propÃ³sito: solo se aplican tweaks desde la copia instalada.
 
 ## Desinstalar
 
-Revierte los tweaks desde la app (**Revertir todo**) antes de desinstalar. Después borra `Program Files\AXE`, `ProgramData\AXE` y el acceso del menú Inicio.
+Revierte los tweaks desde la app (**Revertir todo**) antes de desinstalar. DespuÃ©s borra `Program Files\AXE`, `ProgramData\AXE` y el acceso del menÃº Inicio.
 
-## Por qué confiar en esto
+## Por quÃ© confiar en esto
 
-- **Revisable:** el motor es PowerShell en texto plano. `dist/AXE.ps1` es la concatenación de 31 módulos y puedes leerlo entero antes de ejecutarlo. El repositorio de desarrollo (fuente por módulos, tests y CI) es privado.
+- **Revisable:** el motor es PowerShell en texto plano. `dist/AXE.ps1` es la concatenaciÃ³n de 31 mÃ³dulos y puedes leerlo entero antes de ejecutarlo. El repositorio de desarrollo (fuente por mÃ³dulos, tests y CI) es privado.
 - **Verificable:** cada release publica `SHA256SUMS` y `sbom.json` (CycloneDX) con los componentes de terceros.
-- **Honesto:** la mayoría de tweaks mueven el FPS dentro del ruido de medición, también en las herramientas de pago. AXE lo dice y marca los probables placebo.
+- **Honesto:** la mayorÃ­a de tweaks mueven el FPS dentro del ruido de mediciÃ³n, tambiÃ©n en las herramientas de pago. AXE lo dice y marca los probables placebo.
 
-Guía completa, comparativa y modos CLI: [docs/GUIA-COMPLETA.md](docs/GUIA-COMPLETA.md). Historial: [CHANGELOG.md](CHANGELOG.md). Licencia: [MIT](LICENSE).
+GuÃ­a completa, comparativa y modos CLI: [docs/GUIA-COMPLETA.md](docs/GUIA-COMPLETA.md). Historial: [CHANGELOG.md](CHANGELOG.md). Licencia: [MIT](LICENSE).
